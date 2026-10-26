@@ -2,7 +2,7 @@
 
 Evidências confirmadas nesta máquina Windows x64 com Python 3.12.3:
 
-- 45 testes passando na rodada completa: referências compartilhadas, reinício, incremental, falhas
+- 46 testes passando em CI Windows e Linux: referências compartilhadas, reinício, incremental, falhas
   parciais, download forçado com preservação, MP3 inválido, prévia obsoleta,
   correções, organização por artista, lixeira, cancelamento, backup SQLite,
   proteção de caminhos e manifesto, exportação incremental e conflitos.
@@ -22,10 +22,18 @@ Evidências confirmadas nesta máquina Windows x64 com Python 3.12.3:
 - Cadastro de playlist e prévia real de 50 downloads validados pela interface;
   prévia cancelada, sem baixar a playlist de terceiros.
 - Detecção de componentes: FFmpeg e Deno preparados com sucesso pelo worker.
+- Consulta real ao MusicBrainz: Metallica classificada como Rock e Metal após
+  filtrar votos negativos e corrigir limites de palavras. Teste de áudio confirmou
+  192.000 bps, 44.100 Hz, dois canais e ID3v2.3.
+- Detecção USB executada no Windows: nenhum dispositivo conectado no momento;
+  não equivale a teste em um pendrive físico.
 
 A validação de hardware (pendrive físico e rádio Cerato 2011) não foi feita.
 Serviços externos podem mudar, limitar consultas ou recusar áudio. Testes locais
 não certificam download universal, matching perfeito ou disponibilidade futura.
 
-Build empacotado, teste do executável e CI são registrados nesta página depois
-da conclusão da publicação; não devem ser inferidos apenas dos testes Python.
+O [pipeline](https://github.com/Jvprotano/spoTano/actions) exige testes em Windows
+e Linux antes da release. Em tags, também executa `scripts/smoke_frozen.py` sobre
+o EXE gerado: importa SDKs dentro do pacote, converte áudio local com FFmpeg e
+confere o MP3. Só então publica ZIP, fontes correspondentes e checksums.
+Esse teste é independente dos testes Python da biblioteca.

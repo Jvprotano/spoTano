@@ -5,7 +5,7 @@
 - [x] Implementar importação completa, plano incremental, downloads atômicos e recuperação.
 - [x] Implementar gêneros/correções, biblioteca e exportação com manifesto e lixeira.
 - [x] Implementar interface, configuração, cancelamento e diagnósticos.
-- [ ] Validar contratos com testes e fluxos reais possíveis neste ambiente.
+- [x] Validar contratos com testes e fluxos reais possíveis neste ambiente.
 - [ ] Empacotar Windows, publicar código e release públicos, conferir CI.
 
 Decisões: nenhuma exclusão automática; prévias verificam revisão do banco. Downloads
