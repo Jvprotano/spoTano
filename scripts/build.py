@@ -3,6 +3,7 @@
 import hashlib
 import importlib.metadata
 import shutil
+import sys
 from pathlib import Path
 
 import PyInstaller.__main__
@@ -48,6 +49,14 @@ def main():
     shutil.copytree(ROOT / "docs", target / "docs", dirs_exist_ok=True)
     licenses = target / "licenses"
     licenses.mkdir(exist_ok=True)
+    python_license = Path(sys.base_prefix) / "LICENSE.txt"
+    if python_license.is_file():
+        shutil.copy2(python_license, licenses / "Python-LICENSE.txt")
+    for license_path in (Path(sys.base_prefix) / "tcl").rglob("license.terms"):
+        relative = license_path.relative_to(Path(sys.base_prefix) / "tcl")
+        destination = licenses / "TclTk" / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(license_path, destination)
     # Include installed distribution notices, including the Python/packager dependencies.
     inventory = []
     for dist in sorted(importlib.metadata.distributions(), key=lambda d: d.metadata["Name"].lower()):

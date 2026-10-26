@@ -45,6 +45,9 @@ jobs:
       - run: python -m pip install -r requirements-lock.txt
       - run: python -m pip install -e . --no-deps
       - run: python scripts/build.py
+      - name: Install FFmpeg for packaged smoke test
+        run: choco install ffmpeg --no-progress -y
+      - run: python scripts/smoke_frozen.py dist/spoTano/spoTano.exe
       - run: python scripts/sources.py
       - name: Publish release
         shell: pwsh

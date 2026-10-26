@@ -141,6 +141,9 @@ class App:
             text="Atualizar reutiliza os arquivos existentes. Remover uma playlist preserva a biblioteca local.",
             foreground="#63786c",
         ).pack(anchor="w", pady=(14, 0))
+        # Reserve the actions before giving remaining space to the growing table.
+        self.playlists.master.pack_forget()
+        self.playlists.master.pack(fill="both", expand=True, pady=12)
 
     def build_library(self):
         parent = self.library_tab
@@ -174,6 +177,8 @@ class App:
         self.button(actions, "Corrigir categoria", self.correct).pack(side="left", padx=8)
         self.button(actions, "Associar MP3 local", self.import_local).pack(side="left")
         self.button(actions, "Revisar faixas sem playlist", self.cleanup).pack(side="right")
+        self.tracks.master.pack_forget()
+        self.tracks.master.pack(fill="both", expand=True, pady=12)
 
     def build_export(self):
         parent = self.export_tab

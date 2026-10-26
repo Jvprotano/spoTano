@@ -14,6 +14,8 @@ Evidências confirmadas nesta máquina Windows x64 com Python 3.12.3:
   sob [CC BY 4.0](https://incompetech.com/music/royalty-free/index.html?gt=&isrc=USUAN1400037).
   Créditos: "Carefree" Kevin MacLeod (incompetech.com), CC BY 4.0.
   O teste detectou e motivou correção do tratamento de caminho de saída upstream.
+  Repetição com o adaptador corrigido e Deno instalado: arquivo de 4.963.624 bytes
+  recebido no caminho solicitado e validado como MP3 44,1 kHz estéreo.
   Nenhum áudio é incluído no repositório ou nas releases.
 - Ruff check e formatação executados no código e testes.
 - Janela desktop aberta e inspecionada visualmente no Windows.
