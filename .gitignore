@@ -1,0 +1,16 @@
+.venv/
+.research/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+*.spec
+*.sqlite*
+*.mp3
+*.part
+*.log
+.env
+local-data/
+artifacts/
