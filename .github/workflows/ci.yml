@@ -53,4 +53,4 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME dist/spotano-*-windows-x64.zip dist/spotano-*-source.zip dist/SHA256SUMS.txt --title "spoTano $env:GITHUB_REF_NAME" --notes-file docs/RELEASE.md --verify-tag
+        run: gh release create $env:GITHUB_REF_NAME dist/spoTano-*-windows-x64.zip dist/spoTano-*-source.zip dist/SHA256SUMS.txt --title "spoTano $env:GITHUB_REF_NAME" --notes-file docs/RELEASE.md --verify-tag
