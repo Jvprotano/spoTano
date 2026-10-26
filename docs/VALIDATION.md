@@ -10,6 +10,8 @@ Evidências confirmadas nesta máquina Windows x64 com Python 3.12.3:
   → validação MP3 → SQLite reaberto → exportação → segunda exportação sem cópias.
 - Consulta real à playlist pública Today’s Top Hits: 50 faixas, total conferido.
   Somente metadados consultados; nenhuma música dessa playlist foi baixada.
+- Consulta real à playlist pública All Out 80s: 150 de 150 faixas, sem itens
+  ignorados, confirmando leitura de playlist maior que uma página.
 - Download real de teste com a faixa **Carefree**, Kevin MacLeod, disponível
   sob [CC BY 4.0](https://incompetech.com/music/royalty-free/index.html?gt=&isrc=USUAN1400037).
   Créditos: "Carefree" Kevin MacLeod (incompetech.com), CC BY 4.0.
@@ -37,3 +39,19 @@ e Linux antes da release. Em tags, também executa `scripts/smoke_frozen.py` sob
 o EXE gerado: importa SDKs dentro do pacote, converte áudio local com FFmpeg e
 confere o MP3. Só então publica ZIP, fontes correspondentes e checksums.
 Esse teste é independente dos testes Python da biblioteca.
+
+## Release publicada e conferida
+
+[v1.0.0](https://github.com/Jvprotano/spoTano/releases/tag/v1.0.0) publicada pelo
+[workflow 40330606186](https://github.com/Jvprotano/spoTano/actions/runs/40330606186),
+com 46 testes passando em cada plataforma e smoke do EXE passando.
+O ZIP publicado foi baixado novamente nesta máquina: hash SHA-256 conferido,
+ausência de áudios/catálogos/arquivos .env verificada e smoke do worker repetido
+com sucesso. A janela do executável publicado também abriu e foi inspecionada.
+
+ZIP Windows: 54.076.730 bytes. SHA-256:
+`97d966185e94ab4fe2ae6dee1adc4aaf5adda112c9d3d24c79e80407a5c33a7a`.
+
+A primeira tentativa de envio da release falhou por diferença de maiúsculas no
+nome dos assets. O workflow em main foi corrigido; a publicação foi repetida
+com a mesma tag verificada, sem reescrever seu histórico.

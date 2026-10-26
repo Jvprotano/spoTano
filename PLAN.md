@@ -6,7 +6,12 @@
 - [x] Implementar gêneros/correções, biblioteca e exportação com manifesto e lixeira.
 - [x] Implementar interface, configuração, cancelamento e diagnósticos.
 - [x] Validar contratos com testes e fluxos reais possíveis neste ambiente.
-- [ ] Empacotar Windows, publicar código e release públicos, conferir CI.
+- [x] Empacotar Windows, publicar código e release públicos, conferir CI.
+
+Entrega: https://github.com/Jvprotano/spoTano/releases/tag/v1.0.0
+CI de publicação: https://github.com/Jvprotano/spoTano/actions/runs/40330606186
+46 testes por plataforma (Windows/Linux), worker congelado validado em CI e
+novamente a partir do ZIP publicado. Hash do ZIP conferido localmente.
 
 Decisões: nenhuma exclusão automática; prévias verificam revisão do banco. Downloads
 substituem versões antigas apenas depois de validar MP3. Falhas na consulta completa
