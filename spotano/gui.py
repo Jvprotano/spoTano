@@ -183,7 +183,10 @@ class App:
         )
         self.group_button = self.button(selection_bar, "Pasta / grupo…", self.assign_group)
         self.group_button.pack(side="right", padx=8)
-        self.build_download_options(parent)
+        self.options_caption = tk.StringVar()
+        ttk.Label(parent, textvariable=self.options_caption, foreground="#63786c", wraplength=880).grid(
+            row=2, column=0, sticky="w", pady=(6, 4)
+        )
         self.playlists = self.tree(
             parent,
             ("Marcar", "Playlist", "Faixas / locais", "Último download", "Pasta na exportação"),
@@ -360,10 +363,19 @@ class App:
         self.label(
             parent,
             "Configurações",
-            "A biblioteca e o histórico ficam neste computador. Não há servidor, assinatura ou IA paga.",
+            "Personalize os downloads e cuide da biblioteca. As preferências são salvas ao alterar; "
+            "a chave Last.fm tem seu próprio botão Salvar.",
         )
+
+        def section(title):
+            frame = ttk.LabelFrame(parent, text=title, padding=14)
+            frame.pack(fill="x", pady=(0, 12))
+            return frame
+
+        self.build_download_options(section("Opções de download"))
+        performance = section("Desempenho")
         self.mb = tk.BooleanVar(value=self.store.setting("musicbrainz", True))
-        parallel = ttk.Frame(parent)
+        parallel = ttk.Frame(performance)
         parallel.pack(fill="x", pady=(0, 8))
         ttk.Label(parallel, text="Downloads em paralelo:").pack(side="left", padx=(0, 8))
         self.download_workers = ttk.Combobox(parallel, values=["1", "2", "3", "4"], state="readonly", width=4)
@@ -377,7 +389,7 @@ class App:
         ttk.Label(
             parallel, text="2 por padrão; reduza se a conexão ou o provedor limitar.", foreground="#63786c"
         ).pack(side="left", padx=8)
-        conversions = ttk.Frame(parent)
+        conversions = ttk.Frame(performance)
         conversions.pack(fill="x", pady=(0, 8))
         ttk.Label(conversions, text="Conversões MP3 em paralelo:").pack(side="left", padx=(0, 8))
         self.conversion_workers = ttk.Combobox(
@@ -395,23 +407,22 @@ class App:
             text="2 por padrão; limite separado para reduzir disputa de CPU.",
             foreground="#63786c",
         ).pack(side="left", padx=8)
-        for text, variable, command in [
-            (
-                "Quando Categoria estiver marcada, consultar gêneros ausentes no MusicBrainz",
-                self.mb,
-                lambda: self.store.set_setting("musicbrainz", self.mb.get()),
-            ),
-        ]:
-            check = ttk.Checkbutton(parent, text=text, variable=variable, command=command)
-            check.pack(anchor="w", pady=8)
-            self.controls.append(check)
+        sources = section("Fontes de categorias · opcionais")
         ttk.Label(
-            parent,
-            text="Confere faixas no iTunes/Deezer e complementa com MusicBrainz/Wikidata.\n"
-            "Usa cache e limite de tempo. Last.fm é opcional. Não precisa de chave para o fluxo padrão.",
+            sources,
+            text="Usadas somente com Categoria marcada. A classificação padrão funciona sem chave de API.",
             foreground="#63786c",
-        ).pack(anchor="w", pady=8)
-        lastfm = ttk.Frame(parent)
+            wraplength=850,
+        ).pack(anchor="w", pady=(0, 8))
+        check = ttk.Checkbutton(
+            sources,
+            text="Consultar MusicBrainz para complementar gêneros ausentes",
+            variable=self.mb,
+            command=lambda: self.store.set_setting("musicbrainz", self.mb.get()),
+        )
+        check.pack(anchor="w")
+        self.controls.append(check)
+        lastfm = ttk.Frame(sources)
         lastfm.pack(fill="x", pady=8)
         ttk.Label(lastfm, text="Chave de API Last.fm (opcional):").pack(side="left")
         self.lastfm_key = ttk.Entry(lastfm, width=30, show="*")
@@ -424,55 +435,62 @@ class App:
             lambda: self.store.set_setting("lastfm_api_key", self.lastfm_key.get().strip()),
         ).pack(side="left")
         ttk.Label(
-            parent,
+            sources,
             text="Last.fm complementa categorias sem evidência nas fontes principais. "
-            "Deixe vazio para usar somente as fontes gratuitas sem chave.",
+            "Para remover a chave, limpe o campo e salve. A chave fica no catálogo local e em seu backup.",
             foreground="#63786c",
             wraplength=900,
         ).pack(anchor="w")
-        self.button(
-            parent, "Aplicar opções às músicas já baixadas", lambda: self.run(self.library.reorganize)
-        ).pack(anchor="w", pady=8)
-        ttk.Label(parent, text="Biblioteca: " + str(self.library.music), wraplength=950).pack(
-            anchor="w", pady=16
+        data = section("Biblioteca e backup")
+        ttk.Label(data, text="Pasta atual: " + str(self.library.music), wraplength=850).pack(
+            anchor="w", pady=(0, 8)
         )
-        actions = ttk.Frame(parent)
+        ttk.Label(
+            data,
+            text="O caminho não é alterado nesta tela. O backup do catálogo não inclui os arquivos de áudio.",
+            foreground="#63786c",
+            wraplength=850,
+        ).pack(anchor="w", pady=(0, 8))
+        actions = ttk.Frame(data)
         actions.pack(fill="x")
-        self.button(actions, "Abrir biblioteca", lambda: open_folder(self.library.music)).pack(side="left")
-        self.button(actions, "Abrir dados e lixeira", lambda: open_folder(self.store.root)).pack(
-            side="left", padx=8
-        )
-        self.button(actions, "Backup do catálogo…", self.backup).pack(side="left")
-        actions2 = ttk.Frame(parent)
-        actions2.pack(fill="x", pady=14)
+        self.button(actions, "Abrir dados e lixeira", lambda: open_folder(self.store.root)).pack(side="left")
+        self.button(actions, "Backup do catálogo…", self.backup).pack(side="left", padx=8)
+        maintenance = section("Preparação e manutenção")
+        actions2 = ttk.Frame(maintenance)
+        actions2.pack(fill="x")
         self.button(
             actions2,
             "Preparar downloads (FFmpeg + Deno)",
             lambda: self.run(
                 self.library.provider.setup, lambda r: messagebox.showinfo("Componentes prontos", str(r))
             ),
-            True,
         ).pack(side="left")
         self.button(actions2, "Diagnóstico", self.diagnostics).pack(side="left", padx=8)
         self.button(actions2, "Reclassificar gêneros", self.reclassify).pack(side="left")
-        self.button(actions2, "Histórico", self.history).pack(side="left", padx=8)
-        self.button(parent, "Abrir métricas das execuções", self.open_metrics).pack(anchor="w", pady=4)
-        self.button(parent, "Limpar cache de correspondências…", self.clear_matches).pack(anchor="w", pady=4)
+        diagnostics = ttk.Frame(maintenance)
+        diagnostics.pack(fill="x", pady=(8, 0))
+        self.button(diagnostics, "Histórico", self.history).pack(side="left")
+        self.button(diagnostics, "Abrir métricas das execuções", self.open_metrics).pack(side="left", padx=8)
+        self.button(maintenance, "Limpar cache de correspondências…", self.clear_matches).pack(
+            anchor="w", pady=(8, 0)
+        )
+        about = section("Sobre o spoTano")
         ttk.Label(
-            parent,
-            text="Use downloads somente quando tiver autorização e quando o provedor permitir.\n"
-            "O Spotify fornece metadados; o áudio é obtido de outros provedores pelo spotDL.\n"
-            "Playlists privadas, bloqueios, limites de consulta e correspondências incorretas podem impedir downloads.",
+            about,
+            text="Perfil de áudio fixo: MP3 · 192 kbps · 44,1 kHz · estéreo · sem capa.\n"
+            "Tags ID3v2.3 quando Metadados estiver marcado.\n"
+            "O Spotify fornece os dados das músicas; o áudio vem de outros provedores. "
+            "Baixe somente com autorização e quando o provedor permitir.",
             foreground="#63786c",
-            wraplength=950,
-        ).pack(anchor="w", pady=8)
+            wraplength=850,
+        ).pack(anchor="w", pady=(0, 8))
         self.button(
-            parent,
+            about,
             "Ajuda e atualizações ↗",
             lambda: webbrowser.open("https://github.com/Jvprotano/spoTano#readme"),
         ).pack(anchor="w")
         ttk.Label(
-            parent,
+            about,
             text=f"spoTano {__version__} · GPL-3.0-or-later · baseado no spotDL 4.6.0",
             foreground="#63786c",
         ).pack(anchor="w", pady=15)
@@ -487,6 +505,7 @@ class App:
                 bind_wheel(child)
 
         bind_wheel(parent)
+        canvas.bind("<MouseWheel>", wheel)
 
     def report(self, message):
         kind = message.get("kind") if isinstance(message, dict) else "progress"
@@ -1214,55 +1233,37 @@ class App:
         self.option_vars = {key: tk.BooleanVar(value=value) for key, value in saved.items()}
         self.option_labels = {key: tk.StringVar() for key in OPTIONS}
         self.option_summary = tk.StringVar()
-        self.options_caption = tk.StringVar()
-        bar = ttk.Frame(parent)
-        bar.grid(row=2, column=0, sticky="ew", pady=(6, 4))
-        self.button(bar, "Personalizar download…", self.open_download_options).pack(side="right")
-        ttk.Label(bar, textvariable=self.options_caption, foreground="#63786c", wraplength=580).pack(
-            side="left", anchor="w"
-        )
-        self.refresh_option_labels()
-
-    def open_download_options(self):
-        if self.busy:
-            return
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Personalizar download · spoTano")
-        dialog.geometry("850x420")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.bind("<Escape>", lambda _: dialog.destroy())
-        box = ttk.Frame(dialog, padding=20)
-        box.pack(fill="both", expand=True)
-        ttk.Label(box, text="Adicione só o que quiser", font=("Segoe UI", 18, "bold")).pack(anchor="w")
         ttk.Label(
-            box,
+            parent,
             text="Tudo desmarcado = músicas juntas em uma pasta, sem classificação nem tags extras.",
             foreground="#63786c",
-        ).pack(anchor="w", pady=(6, 12))
-        actions = ttk.Frame(box)
+            wraplength=850,
+        ).pack(anchor="w", pady=(0, 10))
+        actions = ttk.Frame(parent)
         actions.pack(fill="x", pady=(0, 10))
-        ttk.Button(actions, text="Marcar tudo", command=lambda: self.select_options(True)).pack(side="left")
-        ttk.Button(actions, text="Desmarcar tudo", command=lambda: self.select_options(False)).pack(
-            side="left", padx=8
-        )
+        self.button(actions, "Marcar tudo", lambda: self.select_options(True)).pack(side="left")
+        self.button(actions, "Desmarcar tudo", lambda: self.select_options(False)).pack(side="left", padx=8)
         for key in OPTIONS:
-            row = ttk.Frame(box)
+            row = ttk.Frame(parent)
             row.pack(fill="x", pady=7)
-            ttk.Checkbutton(
+            check = ttk.Checkbutton(
                 row, text=OPTIONS[key], variable=self.option_vars[key], command=self.save_download_options
-            ).pack(side="left")
+            )
+            check.pack(side="left")
+            self.controls.append(check)
             ttk.Label(row, textvariable=self.option_labels[key], foreground="#63786c").pack(side="right")
-        ttk.Label(box, textvariable=self.option_summary, foreground="#63786c", wraplength=800).pack(
+        ttk.Label(parent, textvariable=self.option_summary, foreground="#63786c", wraplength=850).pack(
             anchor="w", pady=(12, 8)
         )
         ttk.Label(
-            box,
+            parent,
             text="Estimativas fixas por música, baseadas em testes anteriores. Os tempos reais podem variar.",
             foreground="#63786c",
+            wraplength=850,
         ).pack(anchor="w")
-        ttk.Button(box, text="Concluir", command=dialog.destroy).pack(side="right", anchor="s", pady=(10, 0))
+        self.button(
+            parent, "Aplicar opções às músicas já baixadas", lambda: self.run(self.library.reorganize)
+        ).pack(anchor="w", pady=(10, 0))
         self.refresh_option_labels()
 
     def refresh_option_labels(self):
@@ -1276,9 +1277,8 @@ class App:
             ["Artista"] if selected["artists"] else []
         )
         path = "/".join([*folders, "Artista - Música [ID].mp3"])
-        mode = "Download simples: todas as músicas juntas, sem classificação nem tags extras."
+        mode = "As alterações valem no próximo download ou exportação."
         if any(selected.values()):
-            mode = "As opções valem no próximo download ou exportação."
             chosen = [
                 name
                 for key, name in (

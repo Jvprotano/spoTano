@@ -186,8 +186,8 @@ em segundo plano sem abrir janelas de terminal.
 ### Organizar e corrigir
 
 O padrão é **Download simples**: todas as músicas ficam soltas na pasta `Music`,
-sem classificação, pastas por artista ou metadados extras no MP3. Em **Playlists →
-Personalizar download**, marque apenas o que desejar, ou use **Marcar tudo** e
+sem classificação, pastas por artista ou metadados extras no MP3. Em **Configurações →
+Opções de download**, marque apenas o que desejar, ou use **Marcar tudo** e
 **Desmarcar tudo**:
 
 - **Categoria**: classifica e cria pastas por gênero; desmarcada, não faz consultas

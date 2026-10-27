@@ -310,6 +310,46 @@ def test_settings_save_optional_key_and_clear_only_correspondences(app, monkeypa
     assert app.store.setting("conversion_workers") == 1
 
 
+def test_inline_download_options_save_and_lock_during_operations(app):
+    checks = [
+        w
+        for w in descendants(app.settings_tab)
+        if isinstance(w, ttk.Checkbutton)
+        and w.cget("text").startswith(("Categoria:", "Artistas:", "Metadados:"))
+    ]
+    assert len(checks) == 3
+    assert not any("Personalizar download" in str(w.cget("text")) for w in app.controls)
+    checks[0].invoke()
+    assert app.store.setting("download_options") == {
+        "categories": True,
+        "artists": False,
+        "metadata": False,
+    }
+    assert "Music/Categoria/" in app.option_summary.get()
+    assert "categoria" in app.options_caption.get()
+    assert "/Categoria/Música.mp3" in app.output_preview.get()
+    select_all = next(
+        w
+        for w in descendants(app.settings_tab)
+        if isinstance(w, ttk.Button) and w.cget("text") == "Marcar tudo"
+    )
+    select_all.invoke()
+    assert all(app.store.setting("download_options").values())
+    app.run(lambda: None)
+    assert all(str(w["state"]) == "disabled" for w in [*checks, select_all])
+    checks[0].invoke()
+    assert all(app.store.setting("download_options").values())
+    pump_until_done(app)
+    assert all(str(w["state"]) == "normal" for w in [*checks, select_all])
+    next(
+        w
+        for w in descendants(app.settings_tab)
+        if isinstance(w, ttk.Button) and w.cget("text") == "Desmarcar tudo"
+    ).invoke()
+    assert not any(app.store.setting("download_options").values())
+    assert "Download simples" in app.options_caption.get()
+
+
 def test_settings_scroll_reaches_actions_at_minimum_size(app):
     app.root.geometry("1000x760")
     app.root.deiconify()
