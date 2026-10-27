@@ -18,6 +18,11 @@ def test_download_installs_returned_filename_and_rejects_escape(tmp_path, monkey
     monkeypatch.setattr(spotdl.utils.ffmpeg, "get_ffmpeg_path", lambda: Path("ffmpeg"))
     monkeypatch.setattr(spotdl.utils.deno, "get_deno_path", lambda: None)
     monkeypatch.setattr(spotdl.utils.spotify.SpotifyClient, "init", lambda **kwargs: None)
+
+    def unwanted_tags(*args, **kwargs):
+        pytest.fail("The worker must leave optional tags to Library")
+
+    monkeypatch.setattr(spotdl.download.downloader, "embed_metadata", unwanted_tags)
     staging = tmp_path / "stage"
     staging.mkdir()
     expected = staging / "audio.mp3"
@@ -28,6 +33,7 @@ def test_download_installs_returned_filename_and_rejects_escape(tmp_path, monkey
             assert "{title}" in settings["output"]
 
         def download_song(self, song):
+            spotdl.download.downloader.embed_metadata(None, song)
             actual = (tmp_path if outside else staging) / "Provider chosen title.mp3"
             actual.write_bytes(b"test audio")
             return song, actual
@@ -43,6 +49,7 @@ def test_download_installs_returned_filename_and_rejects_escape(tmp_path, monkey
         )
     )
     worker(request, result)
+    assert spotdl.download.downloader.embed_metadata is unwanted_tags
     response = json.loads(result.read_text(encoding="utf-8"))
     if outside:
         assert "error" in response and not expected.exists()

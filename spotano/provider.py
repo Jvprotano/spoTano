@@ -184,9 +184,15 @@ def worker(request: Path, result: Path):
             )
             answer = strict_playlist(SpotifyClient(), payload["url"])
         elif action == "local":
-            from spotdl.utils.ffmpeg import get_ffmpeg_path
+            import shutil
 
-            ffmpeg = get_ffmpeg_path()
+            # Local audio needs only FFmpeg; avoid loading the remote SDK when
+            # a system installation is already available.
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                from spotdl.utils.ffmpeg import get_ffmpeg_path
+
+                ffmpeg = get_ffmpeg_path()
             if not ffmpeg:
                 raise ValueError("Prepare os componentes de download nas Configurações.")
             options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
@@ -197,6 +203,8 @@ def worker(request: Path, result: Path):
                     "-i",
                     payload["source"],
                     "-vn",
+                    "-map_metadata",
+                    "-1",
                     "-codec:a",
                     "libmp3lame",
                     "-b:a",
@@ -207,10 +215,6 @@ def worker(request: Path, result: Path):
                     "2",
                     "-id3v2_version",
                     "3",
-                    "-metadata",
-                    "title=" + payload["metadata"]["name"],
-                    "-metadata",
-                    "artist=" + payload["metadata"]["artist"],
                     payload["output"],
                 ],
                 check=True,
@@ -242,7 +246,7 @@ def worker(request: Path, result: Path):
                 "format": "mp3",
                 "bitrate": "192k",
                 "ffmpeg": str(ffmpeg),
-                "ffmpeg_args": "-ar 44100 -ac 2 -id3v2_version 3",
+                "ffmpeg_args": "-ar 44100 -ac 2 -id3v2_version 3 -map_metadata -1",
                 "threads": 1,
                 "lyrics_providers": [],
                 "audio_providers": ["youtube-music", "youtube"],
@@ -252,7 +256,16 @@ def worker(request: Path, result: Path):
             }
             downloader = Downloader(settings=settings, loop=loop)
             song = Song.from_missing_data(**payload["metadata"])
-            _, path = downloader.download_song(song)
+            # spotDL 4.6.0 has no skip-all-tags setting. Tags are optional work
+            # owned by Library, after download, in both local and remote flows.
+            from spotdl.download import downloader as downloader_module
+
+            original_embed = downloader_module.embed_metadata
+            downloader_module.embed_metadata = lambda *args, **kwargs: None
+            try:
+                _, path = downloader.download_song(song)
+            finally:
+                downloader_module.embed_metadata = original_embed
             if path is None or not Path(path).is_file():
                 raise ValueError("Áudio indisponível ou bloqueado pelo provedor. Tente novamente mais tarde.")
             target = Path(payload["output"]).resolve()

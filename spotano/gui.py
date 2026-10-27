@@ -16,6 +16,7 @@ from .db import Store
 from .exporter import Exporter, usb_drives
 from .genres import CATEGORIES
 from .library import Library, SyncPlan
+from .options import OPTIONS, download_options, option_costs
 from .provider import Cancelled, SpotProvider
 
 
@@ -128,6 +129,7 @@ class App:
         ttk.Label(parent, text="Cole uma URL https://open.spotify.com/playlist/…", foreground="#63786c").pack(
             anchor="w", pady=6
         )
+        self.build_download_options(parent)
         self.playlists = self.tree(
             parent, ("Playlist", "Faixas", "Última leitura", "Observações"), (330, 70, 180, 260)
         )
@@ -185,7 +187,7 @@ class App:
         self.label(
             parent,
             "Pronto para pegar a estrada",
-            "MP3 · 192 kbps · 44,1 kHz · estéreo · nomes curtos sem acentos · pastas por categoria ou artista",
+            "MP3 · 192 kbps · 44,1 kHz · estéreo · organização e metadados conforme suas opções em Playlists",
         )
         ttk.Label(parent, text="Destino").pack(anchor="w")
         bar = ttk.Frame(parent)
@@ -226,16 +228,10 @@ class App:
             "Configurações",
             "A biblioteca e o histórico ficam neste computador. Não há servidor, assinatura ou IA paga.",
         )
-        self.by_genre = tk.BooleanVar(value=self.store.setting("by_genre", True))
         self.mb = tk.BooleanVar(value=self.store.setting("musicbrainz", True))
         for text, variable, command in [
             (
-                "Organizar por gênero (desativado: pastas por artista)",
-                self.by_genre,
-                self.change_organization,
-            ),
-            (
-                "Consultar gêneros no MusicBrainz quando faltarem metadados",
+                "Quando Categoria estiver marcada, consultar gêneros ausentes no MusicBrainz",
                 self.mb,
                 lambda: self.store.set_setting("musicbrainz", self.mb.get()),
             ),
@@ -248,6 +244,9 @@ class App:
             text="A consulta envia o nome do artista ao MusicBrainz. Resultados ficam em cache por 90 dias.\n"
             "Gêneros ausentes ou ambíguos ficam em Outros; você pode corrigir na Biblioteca.",
             foreground="#63786c",
+        ).pack(anchor="w", pady=8)
+        self.button(
+            parent, "Aplicar opções às músicas já baixadas", lambda: self.run(self.library.reorganize)
         ).pack(anchor="w", pady=8)
         ttk.Label(parent, text="Biblioteca: " + str(self.library.music), wraplength=950).pack(
             anchor="w", pady=16
@@ -343,6 +342,7 @@ class App:
         self.root.after(100, self.pump)
 
     def refresh(self):
+        self.refresh_option_labels()
         self.playlists.delete(*self.playlists.get_children())
         playlists = self.store.playlists()
         for row in playlists:
@@ -384,7 +384,12 @@ class App:
                 "",
                 "end",
                 iid=row["id"],
-                values=(title, row["override"] or row["category"], status, row["references_count"]),
+                values=(
+                    title,
+                    row["override"] or (row["category"] if row["classified"] else "Não classificada"),
+                    status,
+                    row["references_count"],
+                ),
             )
 
     def track_detail(self, _=None):
@@ -553,11 +558,104 @@ class App:
                 "Exportar",
             )
 
-        self.run(lambda: self.exporter.preview(destination), reviewed)
+        def preview():
+            self.library.reorganize()
+            return self.exporter.preview(destination)
 
-    def change_organization(self):
-        self.store.set_setting("by_genre", self.by_genre.get())
-        self.run(self.library.reorganize)
+        self.run(preview, reviewed)
+
+    def build_download_options(self, parent):
+        saved = download_options(self.store)
+        self.option_vars = {key: tk.BooleanVar(value=value) for key, value in saved.items()}
+        self.option_labels = {key: tk.StringVar() for key in OPTIONS}
+        self.option_summary = tk.StringVar()
+        self.options_caption = tk.StringVar()
+        bar = ttk.Frame(parent)
+        bar.pack(fill="x", pady=(6, 4))
+        self.button(bar, "Personalizar download…", self.open_download_options).pack(side="right")
+        ttk.Label(bar, textvariable=self.options_caption, foreground="#63786c", wraplength=580).pack(
+            side="left", anchor="w"
+        )
+        self.refresh_option_labels()
+
+    def open_download_options(self):
+        if self.busy:
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Personalizar download · spoTano")
+        dialog.geometry("850x420")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.bind("<Escape>", lambda _: dialog.destroy())
+        box = ttk.Frame(dialog, padding=20)
+        box.pack(fill="both", expand=True)
+        ttk.Label(box, text="Adicione só o que quiser", font=("Segoe UI", 18, "bold")).pack(anchor="w")
+        ttk.Label(
+            box,
+            text="Tudo desmarcado = músicas juntas em uma pasta, sem classificação nem tags extras.",
+            foreground="#63786c",
+        ).pack(anchor="w", pady=(6, 12))
+        actions = ttk.Frame(box)
+        actions.pack(fill="x", pady=(0, 10))
+        ttk.Button(actions, text="Marcar tudo", command=lambda: self.select_options(True)).pack(side="left")
+        ttk.Button(actions, text="Desmarcar tudo", command=lambda: self.select_options(False)).pack(
+            side="left", padx=8
+        )
+        for key in OPTIONS:
+            row = ttk.Frame(box)
+            row.pack(fill="x", pady=7)
+            ttk.Checkbutton(
+                row, text=OPTIONS[key], variable=self.option_vars[key], command=self.save_download_options
+            ).pack(side="left")
+            ttk.Label(row, textvariable=self.option_labels[key], foreground="#63786c").pack(side="right")
+        ttk.Label(box, textvariable=self.option_summary, foreground="#63786c", wraplength=800).pack(
+            anchor="w", pady=(12, 8)
+        )
+        ttk.Label(
+            box,
+            text="Estimativas fixas por música, baseadas em testes anteriores. Os tempos reais podem variar.",
+            foreground="#63786c",
+        ).pack(anchor="w")
+        ttk.Button(box, text="Concluir", command=dialog.destroy).pack(side="right", anchor="s", pady=(10, 0))
+        self.refresh_option_labels()
+
+    def refresh_option_labels(self):
+        if not hasattr(self, "option_labels"):
+            return
+        costs = option_costs()
+        for key in OPTIONS:
+            self.option_labels[key].set(costs[key])
+        selected = {key: variable.get() for key, variable in self.option_vars.items()}
+        folders = (["Categoria"] if selected["categories"] else []) + (
+            ["Artista"] if selected["artists"] else []
+        )
+        path = "/".join([*folders, "Artista - Música [ID].mp3"])
+        mode = "Download simples: todas as músicas juntas, sem classificação nem tags extras."
+        if any(selected.values()):
+            mode = "As opções valem no próximo download ou exportação."
+            chosen = [
+                name
+                for key, name in (
+                    ("categories", "categoria"),
+                    ("artists", "artistas"),
+                    ("metadata", "metadados"),
+                )
+                if selected[key]
+            ]
+            self.options_caption.set("Download personalizado · " + ", ".join(chosen))
+        else:
+            self.options_caption.set("Download simples · músicas juntas na mesma pasta, sem tags extras.")
+        self.option_summary.set(f"{mode}\nPasta: Music/{path}")
+
+    def save_download_options(self):
+        self.store.set_setting("download_options", {key: var.get() for key, var in self.option_vars.items()})
+        self.refresh_option_labels()
+
+    def select_options(self, enabled):
+        for variable in self.option_vars.values():
+            variable.set(enabled)
+        self.save_download_options()
 
     def reclassify(self):
         def work():
@@ -572,7 +670,9 @@ class App:
                 self.report("Classificando " + metadata["artist"])
                 category = resolver.resolve(metadata)
                 with self.store.connect() as db:
-                    db.execute("UPDATE tracks SET category=? WHERE id=?", (category, track["id"]))
+                    db.execute(
+                        "UPDATE tracks SET category=?,classified=1 WHERE id=?", (category, track["id"])
+                    )
                     self.store.bump(db)
             self.library.reorganize()
 

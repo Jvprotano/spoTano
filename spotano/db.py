@@ -34,8 +34,17 @@ class Store:
         with self.connect() as db:
             db.executescript(SCHEMA)
             db.execute("PRAGMA journal_mode=WAL")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(tracks)")}
+            if "tagged" not in columns:
+                db.execute("ALTER TABLE tracks ADD COLUMN tagged INTEGER NOT NULL DEFAULT 1")
+            if "classified" not in columns:
+                db.execute("ALTER TABLE tracks ADD COLUMN classified INTEGER NOT NULL DEFAULT 0")
+                db.execute("UPDATE tracks SET classified=1 WHERE path IS NOT NULL")
             db.execute("INSERT OR IGNORE INTO settings VALUES('revision', '0')")
-            db.execute("INSERT OR IGNORE INTO settings VALUES('by_genre', 'true')")
+            db.execute(
+                "INSERT OR IGNORE INTO settings VALUES('download_options', ?)",
+                (json.dumps({"categories": False, "artists": False, "metadata": False}),),
+            )
             db.execute("INSERT OR IGNORE INTO settings VALUES('musicbrainz', 'true')")
 
     @contextmanager

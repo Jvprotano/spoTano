@@ -57,3 +57,17 @@ def test_real_audio_transcode_library_restart_export(tmp_path):
     exporter.apply(exporter.preview(usb))
     assert exporter.preview(usb).reused == 1
     assert exporter.preview(usb).copy == []
+    # Apply extras to the real MP3 and return to flat/tag-free without downloading.
+    from mutagen.mp3 import MP3
+
+    store.set_setting("download_options", {"categories": True, "artists": True, "metadata": True})
+    lib.reorganize()
+    row = store.tracks()[0]
+    assert row["path"].startswith("Rock e Metal/spoTano Tests/")
+    assert MP3(lib.music / row["path"]).tags["TIT2"].text == [metadata["name"]]
+    validate_mp3(lib.music / row["path"])
+    store.set_setting("download_options", {})
+    lib.reorganize()
+    row = store.tracks()[0]
+    assert "/" not in row["path"] and MP3(lib.music / row["path"]).tags is None
+    validate_mp3(lib.music / row["path"])

@@ -10,7 +10,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .audio import write_tags
 from .genres import CATEGORIES, GenreResolver
+from .options import download_options
 from .paths import digest, inside, safe_name
 from .provider import Cancelled
 
@@ -105,10 +107,23 @@ class Library:
         return plan
 
     def relative_path(self, track_id, metadata, category):
-        folder = category if self.store.setting("by_genre", True) else safe_name(metadata["artist"])
-        return (
-            f"{safe_name(folder)}/{safe_name(metadata['artist'] + ' - ' + metadata['name'])} [{track_id}].mp3"
-        )
+        options = download_options(self.store)
+        folders = []
+        if options["categories"]:
+            folders.append(safe_name(category))
+        if options["artists"]:
+            folders.append(safe_name(metadata["artist"]))
+        # ID suffix keeps same-title tracks collision-safe even in a single folder.
+        folders.append(f"{safe_name(metadata['artist'] + ' - ' + metadata['name'])} [{track_id}].mp3")
+        return "/".join(folders)
+
+    def prepare_target(self, relative):
+        parent = self.music
+        parts = Path(relative).parts[:-1]
+        for folder in parts:
+            parent = inside(parent, folder)
+            parent.mkdir(exist_ok=True)
+        return inside(self.music, relative)
 
     def apply(self, plan):
         self.check_cancel()
@@ -120,7 +135,7 @@ class Library:
             for playlist_id, snapshot in plan.snapshots:
                 for track in snapshot["tracks"]:
                     db.execute(
-                        """INSERT INTO tracks(id,metadata) VALUES(?,?)
+                        """INSERT INTO tracks(id,metadata,classified) VALUES(?,?,0)
                         ON CONFLICT(id) DO UPDATE SET metadata=excluded.metadata""",
                         (track["song_id"], json.dumps(track, ensure_ascii=False)),
                     )
@@ -141,6 +156,7 @@ class Library:
                 )
             self.store.bump(db)
         resolver = GenreResolver(self.store)
+        options = download_options(self.store)
         failures = []
         total = len(plan.downloads)
         for index, metadata in enumerate(plan.downloads, 1):
@@ -151,16 +167,18 @@ class Library:
             staging.mkdir(parents=True)
             try:
                 current = self.store.rows("SELECT * FROM tracks WHERE id=?", (track_id,))[0]
-                category = current["override"] or resolver.resolve(metadata)
+                category = current["override"] or current["category"]
+                if options["categories"] and not current["override"]:
+                    category = resolver.resolve(metadata)
                 self.check_cancel()
                 output = staging / "audio.mp3"
                 self.provider.download(metadata, output)
                 self.check_cancel()
+                write_tags(output, metadata, options["metadata"])
                 self.validator(output)
                 file_hash = digest(output)
                 relative = self.relative_path(track_id, metadata, category)
-                target = inside(self.music, relative)
-                target.parent.mkdir(parents=True, exist_ok=True)
+                target = self.prepare_target(relative)
                 if target.exists() and (current["path"] != relative or digest(target) != current["sha256"]):
                     raise ValueError("Arquivo local alterado ou desconhecido; preservado para revisão.")
                 # If replacement changes content, retain the old bytes before replacing them.
@@ -171,8 +189,17 @@ class Library:
                 os.replace(output, target)
                 with self.store.connect() as db:
                     db.execute(
-                        "UPDATE tracks SET path=?,sha256=?,category=?,status='ready',error='',updated_at=? WHERE id=?",
-                        (relative, file_hash, category, now(), track_id),
+                        "UPDATE tracks SET path=?,sha256=?,category=?,tagged=?,classified=?,"
+                        "status='ready',error='',updated_at=? WHERE id=?",
+                        (
+                            relative,
+                            file_hash,
+                            category,
+                            int(options["metadata"]),
+                            int(options["categories"] or current["classified"]),
+                            now(),
+                            track_id,
+                        ),
                     )
                     self.store.bump(db)
                 # Old path may remain after an interrupted reorganization. Never remove it blindly.
@@ -194,31 +221,66 @@ class Library:
         return {"downloaded": total - len(failures), "reused": plan.retained, "failures": failures}
 
     def reorganize(self):
+        options = download_options(self.store)
+        resolver = GenreResolver(self.store)
         for track in self.store.tracks():
             self.check_cancel()
             if not track["path"]:
                 continue
             metadata = json.loads(track["metadata"])
-            relative = self.relative_path(track["id"], metadata, track["override"] or track["category"])
-            if relative == track["path"]:
+            category = track["override"] or track["category"]
+            classified = bool(track["classified"])
+            if options["categories"] and not classified and not track["override"]:
+                category = resolver.resolve(metadata)
+                classified = True
+            relative = self.relative_path(track["id"], metadata, category)
+            retag = bool(track["tagged"]) != options["metadata"]
+            if relative == track["path"] and not retag:
+                if classified != bool(track["classified"]):
+                    with self.store.connect() as db:
+                        db.execute(
+                            "UPDATE tracks SET category=?,classified=? WHERE id=?",
+                            (category, int(classified), track["id"]),
+                        )
+                        self.store.bump(db)
                 continue
             source, target = inside(self.music, track["path"]), inside(self.music, relative)
             if not source.is_file():
                 continue
             if digest(source) != track["sha256"]:
                 raise ValueError("Arquivo modificado externamente; reorganização bloqueada: " + str(source))
-            target.parent.mkdir(parents=True, exist_ok=True)
+            target = self.prepare_target(relative)
             if target.exists() and digest(target) != track["sha256"]:
                 raise ValueError("Conflito de nomes na reorganização: " + str(target))
             # Copy first, commit new path, then remove old verified copy. Crash-safe on both sides.
             from .paths import atomic_copy
 
-            if not target.exists():
-                atomic_copy(source, target, track["sha256"])
+            file_hash = track["sha256"]
+            if retag:
+                staging = self.store.root / "staging" / uuid.uuid4().hex
+                staging.mkdir(parents=True)
+                try:
+                    output = staging / "audio.mp3"
+                    atomic_copy(source, output, file_hash)
+                    write_tags(output, metadata, options["metadata"])
+                    self.validator(output)
+                    self.check_cancel()
+                    backup = inside(self.store.root, "trash/" + uuid.uuid4().hex + "/" + track["path"])
+                    atomic_copy(source, backup, file_hash)
+                    file_hash = digest(output)
+                    os.replace(output, target)
+                finally:
+                    shutil.rmtree(staging)
+            elif not target.exists():
+                atomic_copy(source, target, file_hash)
             with self.store.connect() as db:
-                db.execute("UPDATE tracks SET path=? WHERE id=?", (relative, track["id"]))
+                db.execute(
+                    "UPDATE tracks SET path=?,sha256=?,category=?,tagged=?,classified=? WHERE id=?",
+                    (relative, file_hash, category, int(options["metadata"]), int(classified), track["id"]),
+                )
                 self.store.bump(db)
-            source.unlink()
+            if source != target:
+                source.unlink()
 
     def correct_genre(self, track_id, category):
         if category and category not in {*CATEGORIES, "Outros"}:

@@ -42,7 +42,36 @@ ambíguas e bloqueiam aquela atualização por segurança.
 
 ### Organizar e corrigir
 
-A classificação por gênero vem ativada. Categorias incluem Sertanejo, Pagode e
+O padrão é **Download simples**: todas as músicas ficam soltas na pasta `Music`,
+sem classificação, pastas por artista ou metadados extras no MP3. Em **Playlists →
+Personalizar download**, marque apenas o que desejar, ou use **Marcar tudo** e
+**Desmarcar tudo**:
+
+- **Categoria**: classifica e cria pastas por gênero; desmarcada, não faz consultas
+  de gênero, inclusive ao MusicBrainz.
+- **Artistas**: cria pastas por artista. Com Categoria, usa `Categoria/Artista`;
+  sozinha, usa apenas `Artista`.
+- **Metadados**: grava título, artistas e os dados disponíveis de álbum, ano e
+  número da faixa em ID3v2.3, sem capa. Desmarcada, não grava essas tags.
+
+O nome do arquivo continua identificando artista, música e ID para evitar
+colisões de títulos na pasta única. Os dados do catálogo usados para localizar o
+áudio continuam disponíveis, independentemente das tags escolhidas.
+
+As escolhas persistem e valem na próxima atualização ou exportação. Para
+reaplicar sem baixar áudio novamente, use **Configurações → Aplicar opções às
+músicas já baixadas**. Alterações de tags preservam uma cópia anterior na lixeira.
+Catálogos antigos também recebem o modo simples como padrão inicial; seus
+arquivos são adaptados quando você executar uma dessas operações.
+
+Cada opção mostra uma **estimativa fixa** de tempo extra por música: Categoria
+**~8 s**, Artistas **menos de 1 s** e Metadados **~0,1 s**. São referências
+aproximadas baseadas nos logs de teste revisados até 27/10/2026; não são
+recalculadas a partir dos logs dos usuários. Cache, conexão, quantidade de artistas
+e computador podem alterar os tempos reais. Os valores não estimam o download
+inteiro nem a velocidade de cópia do pendrive.
+
+Com Categoria habilitada, as categorias incluem Sertanejo, Pagode e
 Samba, MPB, Rock e Metal, Pop, Eletrônica, Rap e Hip-Hop, Forró, Gospel e outras.
 Gêneros disponíveis são agrupados; quando faltam, a consulta gratuita ao
 MusicBrainz usa o artista e um cache de 90 dias. Isso não garante a classificação
@@ -51,7 +80,8 @@ de cada música. Sem evidência suficiente, o destino é **Outros**.
 Na Biblioteca, selecione uma faixa, escolha a categoria e clique **Corrigir
 categoria**. A correção persiste e tem prioridade. **Automática** remove a
 correção. **Reclassificar gêneros** nas Configurações atualiza as classificações
-automáticas. Desative **Organizar por gênero** para usar pastas por artista.
+automáticas. Selecione **Artistas** sem **Categoria** para usar pastas por artista,
+ou desmarque ambas para manter as músicas juntas.
 Trocar organização reaproveita os áudios; não cria downloads.
 
 **Associar MP3 local** permite usar uma gravação que você já possui e tem direito
@@ -73,15 +103,16 @@ arquivos desconhecidos ou modificados bloqueiam a exportação; nada fora da pas
 spoTano é gerenciado. Se faltar alguma música, a exportação é bloqueada até você
 resolver a biblioteca, evitando produzir uma coleção incompleta silenciosamente.
 
-Exportações seguintes conferem hashes e copiam somente mudanças. Pastas mantêm
-a organização por gênero ou artista. Áudios que saem de todas as playlists
+Exportações seguintes conferem hashes e copiam somente mudanças. A exportação
+segue as opções escolhidas: pasta única, gênero, artista ou gênero/artista.
+Áudios que saem de todas as playlists
 deixam a coleção exportada após confirmação; as versões antigas ficam em
 `spoTano\.spotano-trash\<lote>`. Essa lixeira ocupa espaço e pode aparecer no
 rádio; esvazie manualmente após conferir ou mova-a para o computador.
 
 ### Kia Cerato 2011 e rádios antigos
 
-Perfil: **MP3 CBR 192 kbps, 44,1 kHz, estéreo, ID3v2.3, sem capas, nomes ASCII e
+Perfil: **MP3 CBR 192 kbps, 44,1 kHz, estéreo, ID3v2.3 quando habilitado, sem capas, nomes ASCII e
 pastas rasas**. Prefira pendrive **FAT32**. O programa não formata discos e não
 promete compatibilidade com todas as versões de rádio. Teste uma coleção pequena
 no carro antes de exportar toda a biblioteca. A referência consultada é o
@@ -96,8 +127,7 @@ Por padrão: `%LOCALAPPDATA%\spoTano\`.
 spoTano/
   library.sqlite3       catálogo, associações, configurações e histórico
   Music/
-    Sertanejo/Artista - Musica [SpotifyID].mp3
-    Rock e Metal/Artista - Musica [SpotifyID].mp3
+    Artista - Musica [SpotifyID].mp3
   staging/              downloads em andamento, nunca considerados prontos
   trash/                versões substituídas e limpeza de órfãos
 ```

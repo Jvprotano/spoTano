@@ -51,7 +51,7 @@ def main():
         )
         info = MP3(result).info
         assert info.sample_rate == 44100 and info.channels == 2 and info.length > 0
-        print("Frozen worker OK: SDK imports, FFmpeg, real MP3 transcoding and tags.")
+        print("Frozen worker OK: SDK imports, FFmpeg and real MP3 transcoding.")
 
 
 if __name__ == "__main__":
