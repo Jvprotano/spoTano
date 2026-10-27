@@ -153,11 +153,12 @@ def test_missing_file_redownloaded(collection):
 
 def test_manual_genre_and_artist_organization_survive_restart(collection):
     store, _, lib = collection
+    store.set_setting("download_options", {"categories": True})
     lib.apply(lib.preview())
     lib.correct_genre(A, "Rock e Metal")
     row = store.tracks()[0]
     assert row["path"].startswith("Rock e Metal/") and lib.available(row)
-    store.set_setting("by_genre", False)
+    store.set_setting("download_options", {"artists": True})
     lib.reorganize()
     assert store.tracks()[0]["path"].startswith("Artista/")
     assert store.tracks()[0]["override"] == "Rock e Metal"
@@ -604,8 +605,11 @@ def test_cancellation_stops_queue_and_preserves_old_audio(collection):
 
 def test_unknown_category_is_repaired_in_reused_audio_without_downloading(collection, monkeypatch):
     store, provider, lib = collection
+    store.set_setting("download_options", {"categories": True})
     provider.snapshots[P1] = snapshot(track(A, "unknown"))
     lib.apply(lib.preview())
+    with store.connect() as db:
+        db.execute("UPDATE tracks SET classified=0")
     old = store.tracks()[0]
     assert old["category"] == "Outros"
     monkeypatch.setattr("spotano.library.GenreResolver.resolve", lambda self, metadata: "Sertanejo")

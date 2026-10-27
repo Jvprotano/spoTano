@@ -14,12 +14,22 @@ GENRE_VERSION = 4
 class GenreBudgetExceeded(ValueError):
     pass
 
+
 CATEGORIES = {
     "Sertanejo": ("sertanejo", "sertaneja", "modao", "moda de viola", "country brasileiro"),
     "Pagode e Samba": ("pagode", "samba", "sambass"),
     "Forro e Piseiro": ("forro", "piseiro", "pisadinha", "baiao", "xote"),
-    "Funk Brasileiro": ("funk carioca", "funk brasileiro", "baile funk", "funk paulista", "brega funk",
-                         "agrofunk", "funknejo", "mandelao", "funk de bh"),
+    "Funk Brasileiro": (
+        "funk carioca",
+        "funk brasileiro",
+        "baile funk",
+        "funk paulista",
+        "brega funk",
+        "agrofunk",
+        "funknejo",
+        "mandelao",
+        "funk de bh",
+    ),
     "MPB": ("mpb", "bossa nova", "tropicalia", "musica popular brasileira"),
     "Rap e Hip-Hop": ("hip hop", "hip-hop", "rap", "trap", "drill", "boom bap"),
     "Reggae": ("reggae", "ska", "dub", "dancehall"),
@@ -57,8 +67,11 @@ def classify(genres):
         weight = max(0, float(value.get("count", value.get("weight", 1)))) if isinstance(value, dict) else 1
         matches = []
         for category, terms in CATEGORIES.items():
-            terms = [term for term in terms if re.search(r"(?<![a-z0-9])" + re.escape(term)
-                                                       + r"(?![a-z0-9])", genre)]
+            terms = [
+                term
+                for term in terms
+                if re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", genre)
+            ]
             if terms:
                 matches.append((category, max(1 if term in broad else 2 for term in terms)))
         # A specific Brazilian style beats an incidental broad family tag.
@@ -128,7 +141,11 @@ class GenreResolver:
             self.local.artist_id = value
 
     def artist_identity(self, metadata):
-        return "spotify:" + metadata["artist_id"] if metadata.get("artist_id") else artist_key(metadata["artist"])
+        return (
+            "spotify:" + metadata["artist_id"]
+            if metadata.get("artist_id")
+            else artist_key(metadata["artist"])
+        )
 
     def wait(self, seconds):
         from .provider import Cancelled
@@ -178,9 +195,11 @@ class GenreResolver:
                 if source == "MusicBrainz" and response.status_code == 404 and "resource" in params:
                     self.failures[source] = 0
                     return {"relations": []}
-                if source not in {"iTunes", "Deezer"} and response.status_code in (
-                    429, 502, 503, 504
-                ) and attempt == 0:
+                if (
+                    source not in {"iTunes", "Deezer"}
+                    and response.status_code in (429, 502, 503, 504)
+                    and attempt == 0
+                ):
                     self.progress(
                         f"Gêneros · {source}: HTTP {response.status_code}; aguardando para tentar uma vez mais."
                     )
@@ -210,9 +229,7 @@ class GenreResolver:
         candidates = []
         for row in data.get("artists", []):
             names = [row.get("name", ""), *[a.get("name", "") for a in row.get("aliases", [])]]
-            if any(
-                artist_key(name) == artist_key(artist) for name in names
-            ):
+            if any(artist_key(name) == artist_key(artist) for name in names):
                 candidates.append(row)
         # Search score measures popularity/relevance, not identity. A lower-scored
         # namesake (e.g. the Brazilian BK) must participate in disambiguation.
@@ -224,27 +241,42 @@ class GenreResolver:
             import requests
 
             try:
-                relation = self.request("MusicBrainz", "https://musicbrainz.org/ws/2/url/",
-                                        {"resource": "https://open.spotify.com/artist/" + spotify_id,
-                                         "inc": "artist-rels", "fmt": "json"})
+                relation = self.request(
+                    "MusicBrainz",
+                    "https://musicbrainz.org/ws/2/url/",
+                    {
+                        "resource": "https://open.spotify.com/artist/" + spotify_id,
+                        "inc": "artist-rels",
+                        "fmt": "json",
+                    },
+                )
             except requests.HTTPError as exc:
                 if exc.response is None or exc.response.status_code != 404:
                     raise
                 return []
-            identities = {row["artist"]["id"] for row in relation.get("relations", [])
-                          if row.get("artist", {}).get("id")}
+            identities = {
+                row["artist"]["id"]
+                for row in relation.get("relations", [])
+                if row.get("artist", {}).get("id")
+            }
             if len(identities) != 1:
                 return []
             self.artist_id = identities.pop()
-            selected = self.request("MusicBrainz", "https://musicbrainz.org/ws/2/artist/" + self.artist_id,
-                                    {"inc": "tags", "fmt": "json"})
+            selected = self.request(
+                "MusicBrainz",
+                "https://musicbrainz.org/ws/2/artist/" + self.artist_id,
+                {"inc": "tags", "fmt": "json"},
+            )
         elif int(candidates[0].get("score", 0)) >= 95:
             selected = candidates[0]
             self.artist_id = selected.get("id", "")
         else:
             return []
-        return [{"name": tag["name"], "count": int(tag.get("count", 0))}
-                for tag in selected.get("tags", []) if int(tag.get("count", 0)) > 0]
+        return [
+            {"name": tag["name"], "count": int(tag.get("count", 0))}
+            for tag in selected.get("tags", [])
+            if int(tag.get("count", 0)) > 0
+        ]
 
     def wikidata(self, artist, spotify_id):
         endpoint = "https://www.wikidata.org/w/api.php"
@@ -316,25 +348,33 @@ class GenreResolver:
         return [label for genre in genre_ids for label in self.genre_labels.get(genre, [])]
 
     def lastfm(self, metadata, track=False):
-        params = {"method": "track.getTopTags" if track else "artist.getTopTags",
-                  "artist": metadata["artist"], "format": "json",
-                  "api_key": self.store.setting("lastfm_api_key", "") or os.environ.get("LASTFM_API_KEY", "")}
+        params = {
+            "method": "track.getTopTags" if track else "artist.getTopTags",
+            "artist": metadata["artist"],
+            "format": "json",
+            "api_key": self.store.setting("lastfm_api_key", "") or os.environ.get("LASTFM_API_KEY", ""),
+        }
         if not params["api_key"]:
             return []
         if track:
             params["track"] = metadata["name"]
         data = self.request("Last.fm", "https://ws.audioscrobbler.com/2.0/", params)
         tags = data.get("toptags", {}).get("tag", [])
-        return [{"name": tag.get("name", ""), "count": int(tag.get("count", 0))}
-                for tag in tags if int(tag.get("count", 0)) > 0]
+        return [
+            {"name": tag.get("name", ""), "count": int(tag.get("count", 0))}
+            for tag in tags
+            if int(tag.get("count", 0)) > 0
+        ]
 
     def resolve(self, metadata):
         self.local.deadline = time.monotonic() + 20
         try:
             return self._resolve(metadata)
         except GenreBudgetExceeded:
-            self.progress(f"Gênero · {metadata.get('artist', '')}: limite de 20s; "
-                          "a classificação poderá ser tentada novamente na atualização.")
+            self.progress(
+                f"Gênero · {metadata.get('artist', '')}: limite de 20s; "
+                "a classificação poderá ser tentada novamente na atualização."
+            )
             return "Outros"
         finally:
             self.local.deadline = float("inf")
@@ -344,8 +384,9 @@ class GenreResolver:
         artist = metadata.get("artist", "")
         if not artist:
             return known
-        override = self.store.rows("SELECT category FROM artist_categories WHERE artist=?",
-                                   (self.artist_identity(metadata),))
+        override = self.store.rows(
+            "SELECT category FROM artist_categories WHERE artist=?", (self.artist_identity(metadata),)
+        )
         if override:
             self.track_evidence(metadata, override[0]["category"], "correção por artista")
             return override[0]["category"]
@@ -356,15 +397,19 @@ class GenreResolver:
             return known
         from .matching import fingerprint
 
-        prior = self.store.rows("SELECT evidence FROM genre_evidence WHERE track_id=?",
-                                (metadata.get("song_id", ""),))
+        prior = self.store.rows(
+            "SELECT evidence FROM genre_evidence WHERE track_id=?", (metadata.get("song_id", ""),)
+        )
         if prior and not self.force:
             data = json.loads(prior[0]["evidence"])
             ttl = evidence_ttl(data)
-            if (data.get("scope") == "track" and data.get("version") == GENRE_VERSION
-                    and data.get("source") != "correção por artista"
-                    and data.get("fingerprint") == fingerprint(metadata)
-                    and time.time() - data.get("fetched_at", 0) < ttl):
+            if (
+                data.get("scope") == "track"
+                and data.get("version") == GENRE_VERSION
+                and data.get("source") != "correção por artista"
+                and data.get("fingerprint") == fingerprint(metadata)
+                and time.time() - data.get("fetched_at", 0) < ttl
+            ):
                 return data["category"]
         failed, weak = False, None
         for catalogue, lookup in (("iTunes", self.itunes), ("Deezer", self.deezer)):
@@ -376,8 +421,12 @@ class GenreResolver:
                         continue
                     category, source = result["category"], catalogue + " faixa"
                     self.progress(f"Gênero · {metadata['name']}: {category} ({source}).")
-                    self.track_evidence(metadata, category, source,
-                                        **{key: value for key, value in result.items() if key != "category"})
+                    self.track_evidence(
+                        metadata,
+                        category,
+                        source,
+                        **{key: value for key, value in result.items() if key != "category"},
+                    )
                     return category
             except Exception as exc:
                 from .provider import Cancelled
@@ -410,8 +459,12 @@ class GenreResolver:
             votes = specific or votes
             if len(votes) == 1:
                 category = next(iter(votes))
-                source = "colaboradores concordantes" if sum(votes.values()) > 1 else "colaborador identificado"
-        if category == "Outros" and (self.store.setting("lastfm_api_key", "") or os.environ.get("LASTFM_API_KEY")):
+                source = (
+                    "colaboradores concordantes" if sum(votes.values()) > 1 else "colaborador identificado"
+                )
+        if category == "Outros" and (
+            self.store.setting("lastfm_api_key", "") or os.environ.get("LASTFM_API_KEY")
+        ):
             try:
                 tags = self.lastfm(metadata, track=True)
                 category = classify(tags)
@@ -429,25 +482,40 @@ class GenreResolver:
             category = result["category"]
             source += " faixa (gênero amplo)"
         if category != "Outros" or not failed:
-            self.track_evidence(metadata, category, source, confidence="broad" if "gênero amplo" in source else "normal")
+            self.track_evidence(
+                metadata, category, source, confidence="broad" if "gênero amplo" in source else "normal"
+            )
         return category
 
     def track_evidence(self, metadata, category, source, **data):
         from .matching import fingerprint
 
-        self.evidence(metadata, {**data, "source": source, "category": category, "scope": "track",
-                                 "fingerprint": fingerprint(metadata), "fetched_at": time.time()})
+        self.evidence(
+            metadata,
+            {
+                **data,
+                "source": source,
+                "category": category,
+                "scope": "track",
+                "fingerprint": fingerprint(metadata),
+                "fetched_at": time.time(),
+            },
+        )
 
     def needs_refresh(self, metadata):
         from .matching import fingerprint
 
-        rows = self.store.rows("SELECT evidence FROM genre_evidence WHERE track_id=?",
-                               (metadata.get("song_id", ""),))
+        rows = self.store.rows(
+            "SELECT evidence FROM genre_evidence WHERE track_id=?", (metadata.get("song_id", ""),)
+        )
         if not rows:
             return True
         data = json.loads(rows[0]["evidence"])
-        return (data.get("version") != GENRE_VERSION or data.get("fingerprint") != fingerprint(metadata)
-                or time.time() - data.get("fetched_at", 0) >= evidence_ttl(data))
+        return (
+            data.get("version") != GENRE_VERSION
+            or data.get("fingerprint") != fingerprint(metadata)
+            or time.time() - data.get("fetched_at", 0) >= evidence_ttl(data)
+        )
 
     def itunes(self, metadata):
         from .catalogue import catalogue_match
@@ -464,7 +532,9 @@ class GenreResolver:
         try:
             catalogue = []
             if not self.force:
-                for row in self.store.rows("SELECT * FROM genre_queries WHERE key IN (?,?)", (key, artist_key_)):
+                for row in self.store.rows(
+                    "SELECT * FROM genre_queries WHERE key IN (?,?)", (key, artist_key_)
+                ):
                     ttl = 86400 if row["key"] == key else 30 * 86400
                     if time.time() - row["fetched_at"] < ttl:
                         if row["key"] == key:
@@ -474,9 +544,17 @@ class GenreResolver:
                 if match:
                     return match
             self.progress(f"Gênero · consultando iTunes para a faixa: {metadata['name']}…")
-            data = self.request("iTunes", "https://itunes.apple.com/search",
-                                {"term": metadata["artist"] + " " + clean_title(metadata["name"]),
-                                 "entity": "song", "media": "music", "country": "br", "limit": 25})
+            data = self.request(
+                "iTunes",
+                "https://itunes.apple.com/search",
+                {
+                    "term": metadata["artist"] + " " + clean_title(metadata["name"]),
+                    "entity": "song",
+                    "media": "music",
+                    "country": "br",
+                    "limit": 25,
+                },
+            )
             rows = data.get("results")
             if not isinstance(rows, list):
                 raise ValueError("Resposta inválida do catálogo iTunes")
@@ -485,9 +563,13 @@ class GenreResolver:
             rows = [{field: row.get(field) for field in fields} for row in rows if isinstance(row, dict)]
             merged = {row["trackId"]: row for row in catalogue + rows if row.get("trackId")}
             with self.store.connect() as db:
-                db.executemany("INSERT OR REPLACE INTO genre_queries VALUES(?,?,?)",
-                               [(key, json.dumps(rows), time.time()),
-                                (artist_key_, json.dumps(list(merged.values())[-200:]), time.time())])
+                db.executemany(
+                    "INSERT OR REPLACE INTO genre_queries VALUES(?,?,?)",
+                    [
+                        (key, json.dumps(rows), time.time()),
+                        (artist_key_, json.dumps(list(merged.values())[-200:]), time.time()),
+                    ],
+                )
             return catalogue_match(metadata, rows)
         finally:
             query_lock.release()
@@ -513,10 +595,14 @@ class GenreResolver:
         for row in data["data"]:
             if not isinstance(row, dict) or not isinstance(row.get("id"), int):
                 continue
-            candidate = {"kind": "song", "trackId": row["id"], "trackName": row.get("title", ""),
-                         "artistName": row.get("artist", {}).get("name", ""),
-                         "trackTimeMillis": float(row.get("duration") or 0) * 1000,
-                         "primaryGenreName": ""}
+            candidate = {
+                "kind": "song",
+                "trackId": row["id"],
+                "trackName": row.get("title", ""),
+                "artistName": row.get("artist", {}).get("name", ""),
+                "trackTimeMillis": float(row.get("duration") or 0) * 1000,
+                "primaryGenreName": "",
+            }
             album = row.get("album", {}).get("id")
             if isinstance(album, int):
                 candidates.append(candidate)
@@ -531,23 +617,32 @@ class GenreResolver:
                 tags = json.loads(cached_album[0]["payload"])
             else:
                 album = self.request("Deezer", "https://api.deezer.com/album/" + str(album_id), {})
-                tags = [genre["name"] for genre in album.get("genres", {}).get("data", [])
-                        if isinstance(genre.get("name"), str)]
+                tags = [
+                    genre["name"]
+                    for genre in album.get("genres", {}).get("data", [])
+                    if isinstance(genre.get("name"), str)
+                ]
                 with self.store.connect() as db:
-                    db.execute("INSERT OR REPLACE INTO genre_queries VALUES(?,?,?)",
-                               (album_key, json.dumps(tags), time.time()))
+                    db.execute(
+                        "INSERT OR REPLACE INTO genre_queries VALUES(?,?,?)",
+                        (album_key, json.dumps(tags), time.time()),
+                    )
             category = classify(tags)
             if category != "Outros":
                 result = {**selected, "category": category, "tags": tags, "album_id": album_id}
         with self.store.connect() as db:
-            db.execute("INSERT OR REPLACE INTO genre_queries VALUES(?,?,?)", (key, json.dumps(result), time.time()))
+            db.execute(
+                "INSERT OR REPLACE INTO genre_queries VALUES(?,?,?)", (key, json.dumps(result), time.time())
+            )
         return result
 
     def evidence(self, metadata, data):
         if metadata.get("song_id"):
             with self.store.connect() as db:
-                db.execute("INSERT OR REPLACE INTO genre_evidence VALUES(?,?)",
-                           (metadata["song_id"], json.dumps({"version": GENRE_VERSION, **data})))
+                db.execute(
+                    "INSERT OR REPLACE INTO genre_evidence VALUES(?,?)",
+                    (metadata["song_id"], json.dumps({"version": GENRE_VERSION, **data})),
+                )
 
     def resolve_artist(self, metadata):
         artist = metadata["artist"]
@@ -587,8 +682,9 @@ class GenreResolver:
                 ("Wikidata", lambda: self.wikidata(artist, metadata.get("artist_id"))),
                 ("Last.fm", lambda: self.lastfm(metadata)),
             ):
-                if source == "Last.fm" and not (self.store.setting("lastfm_api_key", "")
-                                                 or os.environ.get("LASTFM_API_KEY")):
+                if source == "Last.fm" and not (
+                    self.store.setting("lastfm_api_key", "") or os.environ.get("LASTFM_API_KEY")
+                ):
                     continue
                 self.progress(f"Gênero · consultando {source}: {artist}…")
                 try:
@@ -610,8 +706,15 @@ class GenreResolver:
                         "INSERT OR REPLACE INTO genre_cache VALUES(?,?,?)",
                         (
                             key,
-                            json.dumps({"version": GENRE_VERSION, "tags": tags, "sources": sources,
-                                        "artist_id": metadata.get("artist_id"), "mbid": self.artist_id}),
+                            json.dumps(
+                                {
+                                    "version": GENRE_VERSION,
+                                    "tags": tags,
+                                    "sources": sources,
+                                    "artist_id": metadata.get("artist_id"),
+                                    "mbid": self.artist_id,
+                                }
+                            ),
                             time.time(),
                         ),
                     )
@@ -627,8 +730,16 @@ class GenreResolver:
             )
             self.progress(f"Gênero · {artist}: {category} ({origin}).")
             if category != "Outros" or not failed:
-                self.evidence(metadata, {"source": origin, "tags": tags, "category": category,
-                                         "artist_id": metadata.get("artist_id"), "mbid": self.artist_id})
+                self.evidence(
+                    metadata,
+                    {
+                        "source": origin,
+                        "tags": tags,
+                        "category": category,
+                        "artist_id": metadata.get("artist_id"),
+                        "mbid": self.artist_id,
+                    },
+                )
             return category
         finally:
             artist_lock.release()

@@ -11,9 +11,10 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from .audio import DurationMismatch, needs_genre, validate_duration, validate_mp3, write_genre
+from .audio import DurationMismatch, needs_genre, validate_duration, validate_mp3, write_genre, write_tags
 from .files import AudioFiles
 from .genres import CATEGORIES, GenreResolver
+from .options import download_options
 from .paths import digest, inside, playlist_url, safe_name
 from .provider import Cancelled
 from .telemetry import RunMetrics, sanitize
@@ -125,8 +126,12 @@ class Library:
         if not playlists:
             raise ValueError("Adicione pelo menos uma playlist.")
         plan = SyncPlan(
-            revision=revision, snapshots=[], force=force, refresh_metadata=not (force or saved),
-            preserve_removed=saved, remove_missing=remove_missing,
+            revision=revision,
+            snapshots=[],
+            force=force,
+            refresh_metadata=not (force or saved),
+            preserve_removed=saved,
+            remove_missing=remove_missing,
         )
         desired = {}
         for playlist in playlists:
@@ -233,11 +238,12 @@ class Library:
             for _, snapshot in plan.snapshots:
                 for track in snapshot["tracks"]:
                     if track["song_id"] not in missing:
-                        db.execute("UPDATE tracks SET status='ready',error='' WHERE id=? AND status='pending'",
-                                   (track["song_id"],))
+                        db.execute(
+                            "UPDATE tracks SET status='ready',error='' WHERE id=? AND status='pending'",
+                            (track["song_id"],),
+                        )
             for track in plan.downloads:
-                db.execute("UPDATE tracks SET status='pending' WHERE id=?",
-                           (track["song_id"],))
+                db.execute("UPDATE tracks SET status='pending' WHERE id=?", (track["song_id"],))
             self.store.bump(db)
         plan.revision = revision + 1
         plan.refresh_metadata = False
@@ -254,20 +260,27 @@ class Library:
                 (playlist_id, row["track_id"])
                 for row in self.store.rows(
                     "SELECT track_id FROM download_membership WHERE playlist_id=?", (playlist_id,)
-                ) if row["track_id"] not in current
+                )
+                if row["track_id"] not in current
             )
         candidates = {track_id for _, track_id in departing}
         protected = {
-            row["track_id"] for row in self.store.rows("SELECT playlist_id,track_id FROM download_membership")
+            row["track_id"]
+            for row in self.store.rows("SELECT playlist_id,track_id FROM download_membership")
             if (row["playlist_id"], row["track_id"]) not in departing
         }
         return [t for t in self.orphan_preview() if t["id"] in candidates - protected]
 
     def relative_path(self, track_id, metadata, category):
-        folder = category if self.store.setting("by_genre", True) else safe_name(metadata["artist"])
-        return (
-            f"{safe_name(folder)}/{safe_name(metadata['artist'] + ' - ' + metadata['name'])} [{track_id}].mp3"
-        )
+        options = download_options(self.store)
+        folders = []
+        if options["categories"]:
+            folders.append(safe_name(category))
+        if options["artists"]:
+            folders.append(safe_name(metadata["artist"]))
+        # ID suffix keeps same-title tracks collision-safe even in a single folder.
+        folders.append(f"{safe_name(metadata['artist'] + ' - ' + metadata['name'])} [{track_id}].mp3")
+        return "/".join(folders)
 
     def apply(self, plan):
         workers = max(1, min(4, int(self.store.setting("download_workers", 2))))
@@ -275,7 +288,9 @@ class Library:
         self.last_run = run.directory
         self.progress(f"Execução {run.run_id} · métricas e diagnóstico em {run.directory}")
         if hasattr(self.provider, "download_settings"):
-            self.provider.download_settings = {"conversion_workers": self.store.setting("conversion_workers", 2)}
+            self.provider.download_settings = {
+                "conversion_workers": self.store.setting("conversion_workers", 2)
+            }
         try:
             result = self._apply(plan, run)
             run.finish("completed_with_errors" if result["failures"] else "completed", **result)
@@ -300,7 +315,7 @@ class Library:
                 for playlist_id, snapshot in plan.snapshots:
                     self.save_snapshot(db, playlist_id, snapshot)
             self.store.bump(db)
-        resolver = GenreResolver(self.store, self.progress, self.cancel)
+        options = download_options(self.store)
         failures = []
         total = len(plan.downloads)
         failed_ids = set()
@@ -331,7 +346,8 @@ class Library:
             started = time.monotonic()
             track_id = metadata["song_id"]
             label = f"{index}/{total} · {metadata['artist']} — {metadata['name']}"
-            self.progress(f"Classificando gênero · {label}")
+            if options["categories"]:
+                self.progress(f"Classificando gênero · {label}")
             staging = self.store.root / "staging" / uuid.uuid4().hex
             staging.mkdir(parents=True)
             try:
@@ -340,18 +356,32 @@ class Library:
                 def classify_track():
                     began = time.monotonic()
                     category = current["override"] or resolver.resolve(metadata)
-                    run.record("classification", track_id=track_id, category=category,
-                               seconds=round(time.monotonic() - began, 3))
+                    run.record(
+                        "classification",
+                        track_id=track_id,
+                        category=category,
+                        seconds=round(time.monotonic() - began, 3),
+                    )
                     return category
 
-                classification = genre_pool.submit(classify_track)
+                category = current["override"] or current["category"]
+                classification = genre_pool.submit(classify_track) if options["categories"] else None
                 self.check_cancel()
                 output = staging / "audio.mp3"
                 source = self.store.rows("SELECT url FROM audio_sources WHERE track_id=?", (track_id,))
-                request = {**metadata, "_cached_match": self.store.audio_match(metadata),
-                           "_source_url": source[0]["url"] if source else None}
-                run.record("track_start", track_id=track_id, name=metadata["name"], artist=metadata["artist"],
-                           expected_duration=metadata.get("duration"), cache_hit=bool(request["_cached_match"]))
+                request = {
+                    **metadata,
+                    "_cached_match": self.store.audio_match(metadata),
+                    "_source_url": source[0]["url"] if source else None,
+                }
+                run.record(
+                    "track_start",
+                    track_id=track_id,
+                    name=metadata["name"],
+                    artist=metadata["artist"],
+                    expected_duration=metadata.get("duration"),
+                    cache_hit=bool(request["_cached_match"]),
+                )
                 self.progress(f"Iniciando download · {label}")
                 try:
                     evidence = self.provider.download(request, output)
@@ -360,10 +390,12 @@ class Library:
                         with self.store.connect() as db:
                             db.execute("DELETE FROM audio_matches WHERE track_id=?", (track_id,))
                     raise
-                category = classification.result()
+                if classification is not None:
+                    category = classification.result()
                 self.check_cancel()
                 self.progress(f"Validando MP3 e calculando SHA-256 · {label}")
-                if self.validator is validate_mp3:
+                write_tags(output, metadata, options["metadata"])
+                if options["metadata"]:
                     write_genre(output, category)
                 info = self.validator(output)
                 if self.validator is validate_mp3:
@@ -372,12 +404,24 @@ class Library:
                 from .matching import fingerprint
 
                 match = evidence.get("match") if isinstance(evidence, dict) else None
-                self.files.install(output, current, relative, category,
-                                   match=match if match and match.get("version") else None,
-                                   fingerprint=fingerprint(metadata))
-                run.record("track_finished", track_id=track_id, status="ready", category=category,
-                           seconds=round(time.monotonic() - started, 3),
-                           evidence=evidence if isinstance(evidence, dict) else {})
+                self.files.install(
+                    output,
+                    current,
+                    relative,
+                    category,
+                    match=match if match and match.get("version") else None,
+                    fingerprint=fingerprint(metadata),
+                    tagged=options["metadata"],
+                    classified=bool(options["categories"] or current["classified"]),
+                )
+                run.record(
+                    "track_finished",
+                    track_id=track_id,
+                    status="ready",
+                    category=category,
+                    seconds=round(time.monotonic() - started, 3),
+                    evidence=evidence if isinstance(evidence, dict) else {},
+                )
                 self.progress(f"Salvo · {label} · {relative}")
                 self.progress(f"Tempo total da faixa · {label} · {time.monotonic() - started:.1f}s")
             except Cancelled:
@@ -390,8 +434,14 @@ class Library:
                     db.execute(
                         "UPDATE tracks SET status='error',error=? WHERE id=?", (message[:1800], track_id)
                     )
-                run.record("track_finished", track_id=track_id, status="error", error=message,
-                           seconds=round(time.monotonic() - started, 3), evidence=getattr(exc, "diagnostic", {}))
+                run.record(
+                    "track_finished",
+                    track_id=track_id,
+                    status="error",
+                    error=message,
+                    seconds=round(time.monotonic() - started, 3),
+                    evidence=getattr(exc, "diagnostic", {}),
+                )
                 self.progress(f"Falha: {metadata['name']} · {message}")
                 return track_id, (metadata["name"], message)
             finally:
@@ -439,20 +489,27 @@ class Library:
         # Repair unknown categories in reused audio too, without another download.
         selected_ids = {t["song_id"] for _, snapshot in plan.snapshots for t in snapshot["tracks"]}
         downloaded_ids = {track["song_id"] for track in plan.downloads}
+        evidence_ids = {row["track_id"] for row in self.store.rows("SELECT track_id FROM genre_evidence")}
         for track in self.store.tracks():
             self.check_cancel()
             if (
-                track["id"] in selected_ids
+                options["categories"]
+                and track["id"] in selected_ids
                 and track["id"] not in failed_ids
                 and track["id"] not in downloaded_ids
                 and track["path"]
                 and not track["override"]
-                and (track["category"] == "Outros" or resolver.needs_refresh(json.loads(track["metadata"])))
+                and (
+                    not track["classified"]
+                    or (track["id"] in evidence_ids and resolver.needs_refresh(json.loads(track["metadata"])))
+                )
             ):
                 category = resolver.resolve(json.loads(track["metadata"]))
-                if category != track["category"]:
+                if category != track["category"] or not track["classified"]:
                     with self.store.connect() as db:
-                        db.execute("UPDATE tracks SET category=? WHERE id=?", (category, track["id"]))
+                        db.execute(
+                            "UPDATE tracks SET category=?,classified=1 WHERE id=?", (category, track["id"])
+                        )
                         self.store.bump(db)
         self.reorganize()
         removed = 0
@@ -490,24 +547,48 @@ class Library:
             f"Finalizado: {total - len(failures)} downloads · {plan.retained} reutilizadas · "
             f"{len(failures)} falhas · {time.monotonic() - batch_started:.1f}s no lote."
         )
-        return {"downloaded": total - len(failures), "reused": plan.retained, "failures": failures,
-                "removed": removed}
+        return {
+            "downloaded": total - len(failures),
+            "reused": plan.retained,
+            "failures": failures,
+            "removed": removed,
+        }
 
     def reorganize(self):
-        pending = {json.loads(row["payload"])["track_id"]
-                   for row in self.store.rows("SELECT payload FROM file_transitions")}
+        with GenreResolver(self.store, self.progress, self.cancel) as resolver:
+            self._reorganize(resolver)
+
+    def _reorganize(self, resolver):
+        options = download_options(self.store)
+        pending = {
+            json.loads(row["payload"])["track_id"]
+            for row in self.store.rows("SELECT payload FROM file_transitions")
+        }
         for track in self.store.tracks():
             self.check_cancel()
             if not track["path"] or track["id"] in pending:
                 continue
             metadata = json.loads(track["metadata"])
-            relative = self.relative_path(track["id"], metadata, track["override"] or track["category"])
+            category = track["override"] or track["category"]
+            classified = bool(track["classified"])
+            if options["categories"] and not classified and not track["override"]:
+                category = resolver.resolve(metadata)
+                classified = True
+            relative = self.relative_path(track["id"], metadata, category)
             source, target = inside(self.music, track["path"]), inside(self.music, relative)
             if not source.is_file():
                 continue
-            category = track["override"] or track["category"]
-            if relative == track["path"] and (self.validator is not validate_mp3
-                                               or not needs_genre(source, category)):
+            retag = bool(track["tagged"]) != options["metadata"]
+            if options["metadata"] and not retag:
+                retag = needs_genre(source, category)
+            if relative == track["path"] and not retag:
+                if classified != bool(track["classified"]) or category != track["category"]:
+                    with self.store.connect() as db:
+                        db.execute(
+                            "UPDATE tracks SET category=?,classified=? WHERE id=?",
+                            (category, int(classified), track["id"]),
+                        )
+                        self.store.bump(db)
                 continue
             if digest(source) != track["sha256"]:
                 raise ValueError("Arquivo modificado externamente; reorganização bloqueada: " + str(source))
@@ -516,12 +597,19 @@ class Library:
             staging = self.store.root / "staging" / uuid.uuid4().hex
             staging.mkdir(parents=True)
             try:
+                from .paths import atomic_copy
+
                 output = staging / "audio.mp3"
-                shutil.copyfile(source, output)
-                if self.validator is validate_mp3:
-                    write_genre(output, category)
+                atomic_copy(source, output, track["sha256"])
+                if retag:
+                    write_tags(output, metadata, options["metadata"])
+                    if options["metadata"]:
+                        write_genre(output, category)
                     self.validator(output)
-                self.files.install(output, track, relative, category)
+                self.check_cancel()
+                self.files.install(
+                    output, track, relative, category, tagged=options["metadata"], classified=classified
+                )
             finally:
                 shutil.rmtree(staging)
 
@@ -565,7 +653,9 @@ class Library:
                     continue
                 category = resolver.resolve(metadata)
                 with self.store.connect() as db:
-                    db.execute("UPDATE tracks SET category=? WHERE id=?", (category, track["id"]))
+                    db.execute(
+                        "UPDATE tracks SET category=?,classified=1 WHERE id=?", (category, track["id"])
+                    )
                     self.store.bump(db)
         self.reorganize()
 

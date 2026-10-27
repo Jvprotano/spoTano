@@ -17,6 +17,7 @@ from .db import Store
 from .exporter import LAYOUTS, Exporter, output_folders, usb_drives
 from .genres import CATEGORIES
 from .library import Library, SyncPlan
+from .options import OPTIONS, download_options, option_costs
 from .provider import Cancelled, SpotProvider
 
 
@@ -99,7 +100,7 @@ class App:
         )
         self.open_downloads_button.pack(side="right")
         self.log_text = tk.Text(
-            logs, height=4, wrap="word", state="disabled", font=("Consolas", 9), bg="#ffffff", relief="flat"
+            logs, height=3, wrap="word", state="disabled", font=("Consolas", 9), bg="#ffffff", relief="flat"
         )
         scroll = ttk.Scrollbar(logs, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scroll.set)
@@ -155,11 +156,12 @@ class App:
         parent.rowconfigure(4, weight=1)
         heading = ttk.Frame(parent)
         heading.grid(row=0, column=0, sticky="ew")
-        self.label(
+        ttk.Label(
             heading,
-            "Importe. Selecione. Baixe.",
-            "Atualizar consulta o Spotify e verifica mudanças. Depois, escolha o que baixar nas playlists marcadas.",
-        )
+            text="Atualizar consulta o Spotify e verifica mudanças. Depois, escolha o que baixar nas playlists marcadas.",
+            foreground="#63786c",
+            wraplength=880,
+        ).pack(anchor="w", pady=(0, 8))
         form = ttk.Frame(parent)
         form.grid(row=1, column=0, sticky="ew")
         ttk.Label(form, text="Link Spotify").pack(side="left", padx=(0, 10))
@@ -181,6 +183,7 @@ class App:
         )
         self.group_button = self.button(selection_bar, "Pasta / grupo…", self.assign_group)
         self.group_button.pack(side="right", padx=8)
+        self.build_download_options(parent)
         self.playlists = self.tree(
             parent,
             ("Marcar", "Playlist", "Faixas / locais", "Último download", "Pasta na exportação"),
@@ -210,7 +213,9 @@ class App:
         self.new_button = self.button(self.incremental_actions, "Baixar novas", lambda: self.sync(False))
         self.new_button.pack(side="left")
         self.mirror_button = self.button(
-            self.incremental_actions, "Baixar e remover excluídas", lambda: self.sync(False, remove_missing=True)
+            self.incremental_actions,
+            "Baixar e remover excluídas",
+            lambda: self.sync(False, remove_missing=True),
         )
         self.mirror_button.pack(side="left", padx=8)
         self.download_hint = tk.StringVar()
@@ -222,7 +227,7 @@ class App:
         ).grid(row=7, column=0, sticky="w", pady=(6, 0))
         self.folder_hint = tk.StringVar()
         ttk.Label(parent, textvariable=self.folder_hint, foreground="#63786c", wraplength=880).grid(
-            row=2, column=0, sticky="w", pady=(6, 0)
+            row=8, column=0, sticky="w", pady=(4, 0)
         )
 
     def build_library(self):
@@ -357,7 +362,6 @@ class App:
             "Configurações",
             "A biblioteca e o histórico ficam neste computador. Não há servidor, assinatura ou IA paga.",
         )
-        self.by_genre = tk.BooleanVar(value=self.store.setting("by_genre", True))
         self.mb = tk.BooleanVar(value=self.store.setting("musicbrainz", True))
         parallel = ttk.Frame(parent)
         parallel.pack(fill="x", pady=(0, 8))
@@ -376,23 +380,24 @@ class App:
         conversions = ttk.Frame(parent)
         conversions.pack(fill="x", pady=(0, 8))
         ttk.Label(conversions, text="Conversões MP3 em paralelo:").pack(side="left", padx=(0, 8))
-        self.conversion_workers = ttk.Combobox(conversions, values=["1", "2", "3", "4"],
-                                              state="readonly", width=4)
+        self.conversion_workers = ttk.Combobox(
+            conversions, values=["1", "2", "3", "4"], state="readonly", width=4
+        )
         self.conversion_workers.set(str(self.store.setting("conversion_workers", 2)))
         self.conversion_workers.pack(side="left")
-        self.conversion_workers.bind("<<ComboboxSelected>>", lambda _: self.store.set_setting(
-            "conversion_workers", int(self.conversion_workers.get())))
+        self.conversion_workers.bind(
+            "<<ComboboxSelected>>",
+            lambda _: self.store.set_setting("conversion_workers", int(self.conversion_workers.get())),
+        )
         self.controls.append(self.conversion_workers)
-        ttk.Label(conversions, text="2 por padrão; limite separado para reduzir disputa de CPU.",
-                  foreground="#63786c").pack(side="left", padx=8)
+        ttk.Label(
+            conversions,
+            text="2 por padrão; limite separado para reduzir disputa de CPU.",
+            foreground="#63786c",
+        ).pack(side="left", padx=8)
         for text, variable, command in [
             (
-                "Organizar por gênero (desativado: pastas por artista)",
-                self.by_genre,
-                self.change_organization,
-            ),
-            (
-                "Consultar gêneros online quando faltarem metadados",
+                "Quando Categoria estiver marcada, consultar gêneros ausentes no MusicBrainz",
                 self.mb,
                 lambda: self.store.set_setting("musicbrainz", self.mb.get()),
             ),
@@ -413,11 +418,21 @@ class App:
         self.lastfm_key.insert(0, self.store.setting("lastfm_api_key", ""))
         self.lastfm_key.pack(side="left", padx=8)
         self.controls.append(self.lastfm_key)
-        self.button(lastfm, "Salvar chave", lambda: self.store.set_setting(
-            "lastfm_api_key", self.lastfm_key.get().strip())).pack(side="left")
-        ttk.Label(parent, text="Last.fm complementa categorias sem evidência nas fontes principais. "
-                  "Deixe vazio para usar somente as fontes gratuitas sem chave.",
-                  foreground="#63786c", wraplength=900).pack(anchor="w")
+        self.button(
+            lastfm,
+            "Salvar chave",
+            lambda: self.store.set_setting("lastfm_api_key", self.lastfm_key.get().strip()),
+        ).pack(side="left")
+        ttk.Label(
+            parent,
+            text="Last.fm complementa categorias sem evidência nas fontes principais. "
+            "Deixe vazio para usar somente as fontes gratuitas sem chave.",
+            foreground="#63786c",
+            wraplength=900,
+        ).pack(anchor="w")
+        self.button(
+            parent, "Aplicar opções às músicas já baixadas", lambda: self.run(self.library.reorganize)
+        ).pack(anchor="w", pady=8)
         ttk.Label(parent, text="Biblioteca: " + str(self.library.music), wraplength=950).pack(
             anchor="w", pady=16
         )
@@ -513,8 +528,8 @@ class App:
         self.append_log("Cancelamento solicitado pelo usuário.")
 
     def toggle_logs(self):
-        expanded = int(self.log_text["height"]) == 4
-        self.log_text.configure(height=12 if expanded else 4)
+        expanded = int(self.log_text["height"]) <= 4
+        self.log_text.configure(height=12 if expanded else 3)
         self.log_size.configure(text="Reduzir logs" if expanded else "Ampliar logs")
 
     def run(self, work, done=lambda result: None):
@@ -576,6 +591,7 @@ class App:
         self.root.after(100, self.pump)
 
     def refresh(self):
+        self.refresh_option_labels()
         self.playlists.delete(*self.playlists.get_children())
         playlists = self.store.playlists()
         self.playlist_rows = {str(p["id"]): p for p in playlists}
@@ -588,13 +604,27 @@ class App:
                 (row["id"],),
             )[0]["n"]
             row["local_count"] = local
-            current = {r["track_id"] for r in self.store.rows(
-                "SELECT track_id FROM membership WHERE playlist_id=?", (row["id"],))}
-            baseline = {r["track_id"] for r in self.store.rows(
-                "SELECT track_id FROM download_membership WHERE playlist_id=?", (row["id"],))}
-            row["changes"] = current != baseline or local < row["count"] or bool(self.store.rows(
-                """SELECT 1 FROM membership m JOIN tracks t ON t.id=m.track_id
-                WHERE m.playlist_id=? AND t.status='pending' LIMIT 1""", (row["id"],)))
+            current = {
+                r["track_id"]
+                for r in self.store.rows("SELECT track_id FROM membership WHERE playlist_id=?", (row["id"],))
+            }
+            baseline = {
+                r["track_id"]
+                for r in self.store.rows(
+                    "SELECT track_id FROM download_membership WHERE playlist_id=?", (row["id"],)
+                )
+            }
+            row["changes"] = (
+                current != baseline
+                or local < row["count"]
+                or bool(
+                    self.store.rows(
+                        """SELECT 1 FROM membership m JOIN tracks t ON t.id=m.track_id
+                WHERE m.playlist_id=? AND t.status='pending' LIMIT 1""",
+                        (row["id"],),
+                    )
+                )
+            )
             self.playlists.insert(
                 "",
                 "end",
@@ -631,19 +661,28 @@ class App:
         for button in (self.force_button, self.update_button, self.remove_button, self.group_button):
             button.configure(state="normal" if count and not self.busy else "disabled")
         selected = [self.playlist_rows[str(i)] for i in self.checked_playlists]
-        changed = any(row["changes"] and (row["downloaded_at"] or row["local_count"]
-                      or row["id"] in getattr(self, "verified_playlists", set())) for row in selected)
+        changed = any(
+            row["changes"]
+            and (
+                row["downloaded_at"]
+                or row["local_count"]
+                or row["id"] in getattr(self, "verified_playlists", set())
+            )
+            for row in selected
+        )
         for button in (self.new_button, self.mirror_button):
             button.configure(state="normal" if changed and not self.busy else "disabled")
         if changed:
             self.incremental_actions.pack(side="left")
-            hint = ("Baixar novas mantém as excluídas na biblioteca. Ambas as ações retomam pendências.\n"
-                    "Baixar e remover excluídas também move as saídas para a lixeira; "
-                    "músicas compartilhadas são preservadas.")
+            hint = (
+                "Baixar novas mantém as excluídas. Baixar e remover excluídas move as saídas para a lixeira."
+            )
         else:
             self.incremental_actions.pack_forget()
-            hint = ("Atualizar apenas consulta e verifica; não baixa nem remove áudios. "
-                    "Baixar tudo baixa novamente todas as faixas da lista salva.")
+            hint = (
+                "Atualizar apenas consulta e verifica; não baixa nem remove áudios. "
+                "Baixar tudo baixa novamente todas as faixas da lista salva."
+            )
         self.download_hint.set(hint)
 
     def mark_playlists(self, mark):
@@ -718,12 +757,16 @@ class App:
         playlists = self.store.playlists()
         layout = self.store.setting("output_layout", "playlists")
         folders = output_folders(playlists, layout)
-        category = "Categoria" if self.store.setting("by_genre", True) else "Artista"
+        options = download_options(self.store)
+        category = "/".join(
+            label for key, label in (("categories", "Categoria"), ("artists", "Artista")) if options[key]
+        )
+        category = category + "/" if category else ""
         if layout == "unified":
-            text = f"Todas as playlists juntas: spoTano/{category}/Música.mp3"
+            text = f"Todas as playlists juntas: spoTano/{category}Música.mp3"
         else:
-            examples = list(dict.fromkeys(f"spoTano/{f}/{category}/Música.mp3" for f in folders.values()))
-            text = "\n".join(examples[:3]) or f"spoTano/Pasta/{category}/Música.mp3"
+            examples = list(dict.fromkeys(f"spoTano/{f}/{category}Música.mp3" for f in folders.values()))
+            text = "\n".join(examples[:3]) or f"spoTano/Pasta/{category}Música.mp3"
             if len(examples) > 3:
                 text += f"\n… mais {len(examples) - 3} pastas (a prévia mostrará todos os arquivos)."
         self.output_preview.set(
@@ -731,12 +774,10 @@ class App:
         )
         description = {
             "unified": "Exportação: todas as playlists ficam juntas. Use Organizar exportação para separar.",
-            "playlists": "Exportação: uma pasta separada por playlist. Altere em Organizar exportação.",
+            "playlists": "Exportação: uma pasta separada por playlist.",
             "groups": "Exportação: mesmo grupo = mesma pasta; sem grupo = Sem grupo.",
         }[layout]
-        self.folder_hint.set(
-            "Downloads juntos na biblioteca compartilhada. " + description
-        )
+        self.folder_hint.set("Downloads na biblioteca compartilhada. " + description)
 
     def refresh_tracks(self):
         if not hasattr(self, "tracks"):
@@ -759,7 +800,12 @@ class App:
                 "",
                 "end",
                 iid=row["id"],
-                values=(title, row["override"] or row["category"], status, row["references_count"]),
+                values=(
+                    title,
+                    row["override"] or (row["category"] if row["classified"] else "Não classificada"),
+                    status,
+                    row["references_count"],
+                ),
             )
 
     def track_detail(self, _=None):
@@ -839,9 +885,13 @@ class App:
                 "Playlists consultadas",
                 f"{len(plan.added)} inclusões · {len(plan.removed)} saídas · "
                 f"{len(plan.downloads)} faixas para baixar\nNenhum áudio foi baixado ou removido.",
-                [*plan.warnings, *[f"+ {p}: {name}" for p, name in plan.added],
-                 *[f"− {p}: {name}" for p, name in plan.removed]],
-                lambda: None, "Fechar",
+                [
+                    *plan.warnings,
+                    *[f"+ {p}: {name}" for p, name in plan.added],
+                    *[f"− {p}: {name}" for p, name in plan.removed],
+                ],
+                lambda: None,
+                "Fechar",
             )
             self.status.set("Consulta concluída. Escolha uma ação de download se houver pendências.")
 
@@ -851,6 +901,7 @@ class App:
         selected = sorted(self.checked_playlists)
         if not selected or self.busy:
             return
+
         def reviewed(plan):
             lines = ["Playlists incluídas nesta operação:"]
             lines += [
@@ -868,7 +919,10 @@ class App:
                 lines += ["Arquivos compartilhados são preservados. Se houver falhas, nada será removido."]
             else:
                 lines += ["As músicas que saíram serão mantidas na biblioteca."]
-            lines += ["\nDownloads na biblioteca compartilhada: " + str(self.library.music), self.folder_hint.get()]
+            lines += [
+                "\nDownloads na biblioteca compartilhada: " + str(self.library.music),
+                self.folder_hint.get(),
+            ]
             self.review(
                 "Conferir download e remoção" if remove_missing else "Conferir download",
                 f"{len(selected)} playlist(s) selecionada(s)\n"
@@ -877,12 +931,20 @@ class App:
                 + (f" · {len(plan.cleanup)} arquivos para a lixeira" if remove_missing else ""),
                 lines,
                 lambda: self.run(lambda: self.library.apply(plan), self.sync_done),
-                "Baixar tudo" if force else "Baixar e remover excluídas" if remove_missing else "Baixar novas",
+                "Baixar tudo"
+                if force
+                else "Baixar e remover excluídas"
+                if remove_missing
+                else "Baixar novas",
             )
             self.status.set("Prévia pronta. Confira as diferenças e confirme os downloads.")
 
-        self.run(lambda: self.library.preview(
-            force, playlist_ids=selected, saved=True, remove_missing=remove_missing), reviewed)
+        self.run(
+            lambda: self.library.preview(
+                force, playlist_ids=selected, saved=True, remove_missing=remove_missing
+            ),
+            reviewed,
+        )
 
     def sync_done(self, result):
         self.show_saved_result(
@@ -928,30 +990,45 @@ class App:
         if selection:
             category = self.category.get()
             metadata = json.loads(self.track_rows[selection[0]]["metadata"])
-            if messagebox.askyesno("Categoria do artista", f"Aplicar {category} a {metadata['artist']}?\n"
-                                   "Correções individuais de faixa continuam tendo prioridade."):
-                self.run(lambda: self.library.correct_artist(
-                    selection[0], "" if category == "Automática" else category))
+            if messagebox.askyesno(
+                "Categoria do artista",
+                f"Aplicar {category} a {metadata['artist']}?\n"
+                "Correções individuais de faixa continuam tendo prioridade.",
+            ):
+                self.run(
+                    lambda: self.library.correct_artist(
+                        selection[0], "" if category == "Automática" else category
+                    )
+                )
 
     def open_metrics(self):
         open_folder(getattr(self.library, "last_run", self.store.root / "runs"))
 
     def clear_matches(self):
-        if messagebox.askyesno("Limpar correspondências", "Pesquisar novamente as gravações nos próximos "
-                               "downloads? Áudios e fontes escolhidas manualmente serão preservados."):
+        if messagebox.askyesno(
+            "Limpar correspondências",
+            "Pesquisar novamente as gravações nos próximos "
+            "downloads? Áudios e fontes escolhidas manualmente serão preservados.",
+        ):
             self.store.clear_audio_matches()
             self.status.set("Cache de correspondências limpo. Os áudios foram preservados.")
 
     def review_copies(self):
         def ready(rows):
             revision = self.store.setting("revision")
-            self.review("Revisar cópias antigas", f"{len(rows)} arquivos físicos sem vínculo serão movidos "
-                        "para a lixeira. Confira cada caminho antes de continuar.",
-                        [row["reason"] + ": " + row["path"] for row in rows],
-                        lambda: self.run(lambda: self.library.files.quarantine(rows, revision),
-                                         lambda path: self.show_saved_result("Cópias preservadas na lixeira",
-                                                                           "Revisão concluída.", path)),
-                        "Mover cópias para lixeira")
+            self.review(
+                "Revisar cópias antigas",
+                f"{len(rows)} arquivos físicos sem vínculo serão movidos "
+                "para a lixeira. Confira cada caminho antes de continuar.",
+                [row["reason"] + ": " + row["path"] for row in rows],
+                lambda: self.run(
+                    lambda: self.library.files.quarantine(rows, revision),
+                    lambda path: self.show_saved_result(
+                        "Cópias preservadas na lixeira", "Revisão concluída.", path
+                    ),
+                ),
+                "Mover cópias para lixeira",
+            )
 
         self.run(self.library.files.review, ready)
 
@@ -967,17 +1044,26 @@ class App:
         dialog.transient(self.root)
         body = ttk.Frame(dialog, padding=18)
         body.pack(fill="both", expand=True)
-        ttk.Label(body, text=metadata["artist"] + " — " + metadata["name"],
-                  wraplength=750, font=("Segoe UI", 12, "bold")).pack(anchor="w")
-        ttk.Label(body, text=f"Duração de referência: {metadata.get('duration') or '?'} s. "
-                  "Confira artista, duração e versão antes de escolher.", wraplength=750).pack(anchor="w", pady=8)
+        ttk.Label(
+            body,
+            text=metadata["artist"] + " — " + metadata["name"],
+            wraplength=750,
+            font=("Segoe UI", 12, "bold"),
+        ).pack(anchor="w")
+        ttk.Label(
+            body,
+            text=f"Duração de referência: {metadata.get('duration') or '?'} s. "
+            "Confira artista, duração e versão antes de escolher.",
+            wraplength=750,
+        ).pack(anchor="w", pady=8)
         sources = self.store.rows("SELECT url FROM audio_sources WHERE track_id=?", (track_id,))
         cached = self.store.audio_match(metadata)
         url = tk.StringVar(value=sources[0]["url"] if sources else (cached or {}).get("url", ""))
         ttk.Label(body, text="URL do vídeo completo no YouTube:").pack(anchor="w")
         ttk.Entry(body, textvariable=url).pack(fill="x", pady=8)
-        candidates = ttk.Treeview(body, columns=("Faixa", "Artista", "Duração", "Confiança"),
-                                  show="headings", height=5)
+        candidates = ttk.Treeview(
+            body, columns=("Faixa", "Artista", "Duração", "Confiança"), show="headings", height=5
+        )
         for name, width in (("Faixa", 350), ("Artista", 180), ("Duração", 80), ("Confiança", 90)):
             candidates.heading(name, text=name)
             candidates.column(name, width=width, stretch=True)
@@ -990,17 +1076,31 @@ class App:
             rows[:] = result
             candidates.delete(*candidates.get_children())
             for index, row in enumerate(rows):
-                candidates.insert("", "end", iid=str(index), values=(row["name"], row["artist"],
-                                  f"{row['duration']:.0f}s", f"{row['score']:.1f}"))
+                candidates.insert(
+                    "",
+                    "end",
+                    iid=str(index),
+                    values=(row["name"], row["artist"], f"{row['duration']:.0f}s", f"{row['score']:.1f}"),
+                )
 
-        candidates.bind("<<TreeviewSelect>>", lambda _: url.set(rows[int(candidates.selection()[0])]["url"])
-                        if candidates.selection() else None)
+        candidates.bind(
+            "<<TreeviewSelect>>",
+            lambda _: (
+                url.set(rows[int(candidates.selection()[0])]["url"]) if candidates.selection() else None
+            ),
+        )
         actions = ttk.Frame(body)
         actions.pack(fill="x", pady=12)
-        ttk.Button(actions, text="Pesquisar opções", command=lambda: self.run(
-            lambda: self.library.provider.candidates(metadata), received)).pack(side="left")
-        ttk.Button(actions, text="Abrir vídeo", command=lambda: webbrowser.open(url.get())
-                   if url.get().startswith("https://") else None).pack(side="left", padx=8)
+        ttk.Button(
+            actions,
+            text="Pesquisar opções",
+            command=lambda: self.run(lambda: self.library.provider.candidates(metadata), received),
+        ).pack(side="left")
+        ttk.Button(
+            actions,
+            text="Abrir vídeo",
+            command=lambda: webbrowser.open(url.get()) if url.get().startswith("https://") else None,
+        ).pack(side="left", padx=8)
 
         def automatic():
             if not self.busy:
@@ -1022,7 +1122,9 @@ class App:
             self.run(lambda: self.library.apply(plan), self.sync_done)
 
         ttk.Button(actions, text="Automática", command=automatic).pack(side="left")
-        ttk.Button(actions, text="Baixar esta gravação", command=download, style="Accent.TButton").pack(side="right")
+        ttk.Button(actions, text="Baixar esta gravação", command=download, style="Accent.TButton").pack(
+            side="right"
+        )
 
     def import_local(self):
         selection = self.tracks.selection()
@@ -1101,12 +1203,105 @@ class App:
                 "Exportar",
             )
 
-        self.run(lambda: self.exporter.preview(destination), reviewed)
+        def preview():
+            self.library.reorganize()
+            return self.exporter.preview(destination)
 
-    def change_organization(self):
-        self.store.set_setting("by_genre", self.by_genre.get())
+        self.run(preview, reviewed)
+
+    def build_download_options(self, parent):
+        saved = download_options(self.store)
+        self.option_vars = {key: tk.BooleanVar(value=value) for key, value in saved.items()}
+        self.option_labels = {key: tk.StringVar() for key in OPTIONS}
+        self.option_summary = tk.StringVar()
+        self.options_caption = tk.StringVar()
+        bar = ttk.Frame(parent)
+        bar.grid(row=2, column=0, sticky="ew", pady=(6, 4))
+        self.button(bar, "Personalizar download…", self.open_download_options).pack(side="right")
+        ttk.Label(bar, textvariable=self.options_caption, foreground="#63786c", wraplength=580).pack(
+            side="left", anchor="w"
+        )
+        self.refresh_option_labels()
+
+    def open_download_options(self):
+        if self.busy:
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Personalizar download · spoTano")
+        dialog.geometry("850x420")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.bind("<Escape>", lambda _: dialog.destroy())
+        box = ttk.Frame(dialog, padding=20)
+        box.pack(fill="both", expand=True)
+        ttk.Label(box, text="Adicione só o que quiser", font=("Segoe UI", 18, "bold")).pack(anchor="w")
+        ttk.Label(
+            box,
+            text="Tudo desmarcado = músicas juntas em uma pasta, sem classificação nem tags extras.",
+            foreground="#63786c",
+        ).pack(anchor="w", pady=(6, 12))
+        actions = ttk.Frame(box)
+        actions.pack(fill="x", pady=(0, 10))
+        ttk.Button(actions, text="Marcar tudo", command=lambda: self.select_options(True)).pack(side="left")
+        ttk.Button(actions, text="Desmarcar tudo", command=lambda: self.select_options(False)).pack(
+            side="left", padx=8
+        )
+        for key in OPTIONS:
+            row = ttk.Frame(box)
+            row.pack(fill="x", pady=7)
+            ttk.Checkbutton(
+                row, text=OPTIONS[key], variable=self.option_vars[key], command=self.save_download_options
+            ).pack(side="left")
+            ttk.Label(row, textvariable=self.option_labels[key], foreground="#63786c").pack(side="right")
+        ttk.Label(box, textvariable=self.option_summary, foreground="#63786c", wraplength=800).pack(
+            anchor="w", pady=(12, 8)
+        )
+        ttk.Label(
+            box,
+            text="Estimativas fixas por música, baseadas em testes anteriores. Os tempos reais podem variar.",
+            foreground="#63786c",
+        ).pack(anchor="w")
+        ttk.Button(box, text="Concluir", command=dialog.destroy).pack(side="right", anchor="s", pady=(10, 0))
+        self.refresh_option_labels()
+
+    def refresh_option_labels(self):
+        if not hasattr(self, "option_labels"):
+            return
+        costs = option_costs()
+        for key in OPTIONS:
+            self.option_labels[key].set(costs[key])
+        selected = {key: variable.get() for key, variable in self.option_vars.items()}
+        folders = (["Categoria"] if selected["categories"] else []) + (
+            ["Artista"] if selected["artists"] else []
+        )
+        path = "/".join([*folders, "Artista - Música [ID].mp3"])
+        mode = "Download simples: todas as músicas juntas, sem classificação nem tags extras."
+        if any(selected.values()):
+            mode = "As opções valem no próximo download ou exportação."
+            chosen = [
+                name
+                for key, name in (
+                    ("categories", "categoria"),
+                    ("artists", "artistas"),
+                    ("metadata", "metadados"),
+                )
+                if selected[key]
+            ]
+            self.options_caption.set("Download personalizado · " + ", ".join(chosen))
+        else:
+            self.options_caption.set("Download simples · músicas juntas na mesma pasta, sem tags extras.")
+        self.option_summary.set(f"{mode}\nPasta: Music/{path}")
+
+    def save_download_options(self):
+        self.store.set_setting("download_options", {key: var.get() for key, var in self.option_vars.items()})
+        self.refresh_option_labels()
         self.refresh_output_preview()
-        self.run(self.library.reorganize)
+
+    def select_options(self, enabled):
+        for variable in self.option_vars.values():
+            variable.set(enabled)
+        self.save_download_options()
 
     def reclassify(self):
         self.run(self.library.reclassify)

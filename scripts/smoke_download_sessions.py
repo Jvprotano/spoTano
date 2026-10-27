@@ -11,7 +11,6 @@ import wave
 from pathlib import Path
 from unittest.mock import patch
 
-from mutagen.id3 import ID3
 from mutagen.mp3 import MP3
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -71,7 +70,7 @@ def main():
                     )
                     audio = MP3(target).info
                     assert audio.sample_rate == 44100 and audio.channels == 2 and audio.length > 0
-                    assert ID3(target).version[1] == 3
+                    assert not MP3(target).tags or not MP3(target).tags.getall("APIC")
                 assert len(launches) == 1, "Each song must reuse the same process"
                 assert sum("Mecanismo pronto em" in message for message in events) == 1
                 assert any("Reutilizando" in message for message in events)
@@ -81,7 +80,7 @@ def main():
             assert launches[0].poll() is not None
             print(
                 f"Warm {'frozen' if exe else 'source'} worker OK: two own samples, one process/initialization, "
-                f"MP3/ID3v2.3, transfer/conversion progress, loopback only, {time.monotonic() - started:.2f}s."
+                f"MP3, transfer/conversion progress, loopback only, {time.monotonic() - started:.2f}s."
             )
         except BaseException:
             print("\n".join(events[-20:]))

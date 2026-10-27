@@ -55,20 +55,33 @@ def main():
             stream.setsampwidth(2)
             stream.setframerate(22050)
             stream.writeframes(b"\x00\x00" * 22050)
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0),
-                    functools.partial(Handler, directory=str(root)))
+        server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), functools.partial(Handler, directory=str(root))
+        )
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        tracks = [{"song_id": f"{i:022d}", "name": f"Own generated {i}", "artist": "spoTano tests",
-                   "duration": 1, "genres": ["sertanejo"], "album_id": None,
-                   "download_url": f"http://127.0.0.1:{server.server_port}/own-generated.wav"}
-                  for i in range(args.tracks)]
+        tracks = [
+            {
+                "song_id": f"{i:022d}",
+                "name": f"Own generated {i}",
+                "artist": "spoTano tests",
+                "duration": 1,
+                "genres": ["sertanejo"],
+                "album_id": None,
+                "download_url": f"http://127.0.0.1:{server.server_port}/own-generated.wav",
+            }
+            for i in range(args.tracks)
+        ]
         events = []
 
         class Provider(SpotProvider):
             def playlist(self, url):
-                return {"name": "Own generated SDK benchmark", "tracks": tracks,
-                        "total": len(tracks), "skipped": 0}
+                return {
+                    "name": "Own generated SDK benchmark",
+                    "tracks": tracks,
+                    "total": len(tracks),
+                    "skipped": 0,
+                }
 
         store = Store(root / "data")
         store.set_setting("download_workers", args.workers)
@@ -90,26 +103,52 @@ def main():
                 assert lib.available(row)
             assert lib.preview().retained == args.tracks
             summary = json.loads((Path(result["run_directory"]) / "summary.json").read_text(encoding="utf-8"))
-            report = {"tracks": args.tracks, "workers": args.workers, "worker_processes": len(processes),
-                      "peak_active_workers": peak,
-                      "worker_restarts": sum(r.get("evidence", {}).get("metrics", {})
-                                             .get("worker_restarts", 0) for r in summary["tracks"]),
-                      "seconds": round(time.monotonic() - began, 3), "downloaded": result["downloaded"],
-                      "failed": len(result["failures"]), "profile_and_hash_verified": args.tracks,
-                      "conversions": args.conversions,
-                      "extractor_initializations": sum(r.get("evidence", {}).get("metrics", {})
-                                                       .get("audio_provider_initializations", 0)
-                                                       for r in summary["tracks"]),
-                      "extractor_reuses": sum(bool(r.get("evidence", {}).get("metrics", {})
-                                                  .get("audio_provider_reused")) for r in summary["tracks"]),
-                      "view_extractions": sum(r.get("evidence", {}).get("metrics", {}).get("view_extractions", 0)
-                                              for r in summary["tracks"]),
-                      "mode": "frozen" if args.exe else "source",
-                      "phase_worker_seconds": {phase: round(sum(r.get("evidence", {}).get("metrics", {})
-                          .get(phase, 0) for r in summary["tracks"]), 3) for phase in (
-                              "initialization_s", "search_s", "extraction_s", "transfer_s",
-                              "conversion_queue_s", "conversion_s", "tags_s")},
-                      "kind": "real SDK/FFmpeg; generated 1s audio; loopback; not YouTube throughput"}
+            report = {
+                "tracks": args.tracks,
+                "workers": args.workers,
+                "worker_processes": len(processes),
+                "peak_active_workers": peak,
+                "worker_restarts": sum(
+                    r.get("evidence", {}).get("metrics", {}).get("worker_restarts", 0)
+                    for r in summary["tracks"]
+                ),
+                "seconds": round(time.monotonic() - began, 3),
+                "downloaded": result["downloaded"],
+                "failed": len(result["failures"]),
+                "profile_and_hash_verified": args.tracks,
+                "conversions": args.conversions,
+                "extractor_initializations": sum(
+                    r.get("evidence", {}).get("metrics", {}).get("audio_provider_initializations", 0)
+                    for r in summary["tracks"]
+                ),
+                "extractor_reuses": sum(
+                    bool(r.get("evidence", {}).get("metrics", {}).get("audio_provider_reused"))
+                    for r in summary["tracks"]
+                ),
+                "view_extractions": sum(
+                    r.get("evidence", {}).get("metrics", {}).get("view_extractions", 0)
+                    for r in summary["tracks"]
+                ),
+                "mode": "frozen" if args.exe else "source",
+                "phase_worker_seconds": {
+                    phase: round(
+                        sum(
+                            r.get("evidence", {}).get("metrics", {}).get(phase, 0) for r in summary["tracks"]
+                        ),
+                        3,
+                    )
+                    for phase in (
+                        "initialization_s",
+                        "search_s",
+                        "extraction_s",
+                        "transfer_s",
+                        "conversion_queue_s",
+                        "conversion_s",
+                        "tags_s",
+                    )
+                },
+                "kind": "real SDK/FFmpeg; generated 1s audio; loopback; not YouTube throughput",
+            }
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")

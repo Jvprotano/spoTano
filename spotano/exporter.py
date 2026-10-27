@@ -140,7 +140,9 @@ class Exporter:
                 else "Conferindo faixa pendente…"
             )
             if not self.library.available(track):
-                raise ValueError("Há faixas ausentes ou alteradas. Use Baixar novas ou Baixar tudo antes de exportar.")
+                raise ValueError(
+                    "Há faixas ausentes ou alteradas. Use Baixar novas ou Baixar tudo antes de exportar."
+                )
             for playlist_id in memberships[track["id"]]:
                 prefix = folders[playlist_id]
                 relative = f"{prefix}/{names[track['id']]}" if prefix else names[track["id"]]

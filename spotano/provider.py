@@ -198,8 +198,9 @@ def strict_playlist(client, url, progress=lambda message: None):
                 "name": raw["name"],
                 "artist": artists[0],
                 "artists": artists,
-                "artist_details": [{"name": a["name"], "id": a.get("id")}
-                                   for a in raw.get("artists", []) if a.get("name")],
+                "artist_details": [
+                    {"name": a["name"], "id": a.get("id")} for a in raw.get("artists", []) if a.get("name")
+                ],
                 "artist_id": next((a.get("id") for a in raw.get("artists", []) if a.get("name")), None),
                 "genres": raw.get("genres", []) + album.get("genres", []),
                 "album_name": album.get("name", ""),
@@ -272,9 +273,15 @@ def _worker(request: Path, result: Path):
             progress("Conectando ao Spotify e lendo metadados da playlist…")
             answer = strict_playlist(SpotifyClient(), payload["url"], progress)
         elif action == "local":
-            from spotdl.utils.ffmpeg import get_ffmpeg_path
+            import shutil
 
-            ffmpeg = get_ffmpeg_path()
+            # Local audio needs only FFmpeg; avoid loading the remote SDK when
+            # a system installation is already available.
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                from spotdl.utils.ffmpeg import get_ffmpeg_path
+
+                ffmpeg = get_ffmpeg_path()
             if not ffmpeg:
                 raise ValueError("Prepare os componentes de download nas Configurações.")
             options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
@@ -286,6 +293,8 @@ def _worker(request: Path, result: Path):
                     "-i",
                     payload["source"],
                     "-vn",
+                    "-map_metadata",
+                    "-1",
                     "-codec:a",
                     "libmp3lame",
                     "-b:a",
@@ -296,10 +305,6 @@ def _worker(request: Path, result: Path):
                     "2",
                     "-id3v2_version",
                     "3",
-                    "-metadata",
-                    "title=" + payload["metadata"]["name"],
-                    "-metadata",
-                    "artist=" + payload["metadata"]["artist"],
                     payload["output"],
                 ],
                 check=True,

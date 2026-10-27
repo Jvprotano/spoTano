@@ -19,9 +19,14 @@ def catalogue_match(metadata, rows, include_unknown=False):
         return None
     matched = []
     for row in rows:
-        if (not isinstance(row, dict) or row.get("kind") != "song" or not row.get("trackId")
-                or not all(isinstance(row.get(key), str) for key in
-                           ("trackName", "artistName", "primaryGenreName"))):
+        if (
+            not isinstance(row, dict)
+            or row.get("kind") != "song"
+            or not row.get("trackId")
+            or not all(
+                isinstance(row.get(key), str) for key in ("trackName", "artistName", "primaryGenreName")
+            )
+        ):
             continue
         if clean_title(row.get("trackName", "")) != wanted:
             continue
@@ -42,16 +47,34 @@ def catalogue_match(metadata, rows, include_unknown=False):
         found = {artist_key(name).replace(" ", "") for name in names}
         primary_words = artist_key(metadata["artist"])
         artist_words = artist_key(row.get("artistName", ""))
-        main_match = primary == author or primary in found or (" " in primary_words and bool(
-            re.search(r"(?<![a-z0-9])" + re.escape(primary_words) + r"(?![a-z0-9])", artist_words)))
+        main_match = (
+            primary == author
+            or primary in found
+            or (
+                " " in primary_words
+                and bool(
+                    re.search(r"(?<![a-z0-9])" + re.escape(primary_words) + r"(?![a-z0-9])", artist_words)
+                )
+            )
+        )
         coverage = credits & found
         if not main_match and len(coverage) < 2:
             continue
         category = classify([row.get("primaryGenreName", "")])
         if category != "Outros" or include_unknown:
-            matched.append({"category": category, "tags": [row["primaryGenreName"]],
-                            "catalogue_id": row["trackId"], "artist": row["artistName"],
-                            "title": row["trackName"], "duration_delta": round(delta, 3)})
+            matched.append(
+                {
+                    "category": category,
+                    "tags": [row["primaryGenreName"]],
+                    "catalogue_id": row["trackId"],
+                    "artist": row["artistName"],
+                    "title": row["trackName"],
+                    "duration_delta": round(delta, 3),
+                }
+            )
     # Conflicting editions/catalogue entries are not a license to guess.
-    return min(matched, key=lambda row: row["duration_delta"]) if matched and len(
-        {row["category"] for row in matched}) == 1 else None
+    return (
+        min(matched, key=lambda row: row["duration_delta"])
+        if matched and len({row["category"] for row in matched}) == 1
+        else None
+    )

@@ -19,16 +19,27 @@ from spotano.library import Library
 
 class Provider:
     def __init__(self, count):
-        self.tracks = [{"song_id": f"{index:022d}", "name": f"Generated {index}",
-                        "artist": f"Generated artist {index % 10}", "genres": ["sertanejo"],
-                        "duration": 180} for index in range(count)]
+        self.tracks = [
+            {
+                "song_id": f"{index:022d}",
+                "name": f"Generated {index}",
+                "artist": f"Generated artist {index % 10}",
+                "genres": ["sertanejo"],
+                "duration": 180,
+            }
+            for index in range(count)
+        ]
         self.calls, self.active, self.peak = 0, 0, 0
         self.lock = threading.Lock()
         self.fail = {self.tracks[19]["song_id"]} if count >= 20 else set()
 
     def playlist(self, url):
-        return {"name": "200-track synthetic benchmark", "total": len(self.tracks),
-                "skipped": 0, "tracks": self.tracks}
+        return {
+            "name": "200-track synthetic benchmark",
+            "total": len(self.tracks),
+            "skipped": 0,
+            "tracks": self.tracks,
+        }
 
     def download(self, metadata, output):
         with self.lock:
@@ -69,10 +80,16 @@ def benchmark(workers, count):
         assert not store.rows("SELECT * FROM file_transitions")
         with store.connect() as db:
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-        return {"workers": workers, "tracks": count, "first_batch_seconds": round(elapsed, 3),
-                "peak_downloads": provider.peak, "resume_downloads": resume["downloaded"],
-                "final_reused": reused["reused"], "final_files": count,
-                "kind": "synthetic_network_and_audio; not a YouTube speed prediction"}
+        return {
+            "workers": workers,
+            "tracks": count,
+            "first_batch_seconds": round(elapsed, 3),
+            "peak_downloads": provider.peak,
+            "resume_downloads": resume["downloaded"],
+            "final_reused": reused["reused"],
+            "final_files": count,
+            "kind": "synthetic_network_and_audio; not a YouTube speed prediction",
+        }
 
 
 def main():

@@ -56,7 +56,7 @@ def main():
         assert any("convertendo áudio local" in event for event in events), events
         info = MP3(result).info
         assert info.sample_rate == 44100 and info.channels == 2 and info.length > 0
-        print("Frozen worker OK: SDK imports, FFmpeg, real MP3 transcoding, tags and progress events.")
+        print("Frozen worker OK: SDK imports, FFmpeg, real MP3 transcoding and progress events.")
 
 
 if __name__ == "__main__":

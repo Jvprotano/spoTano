@@ -137,4 +137,3 @@ def test_new_catalog_separates_exports_and_existing_preference_survives(tmp_path
     assert store.setting("output_layout") == "playlists"
     store.set_setting("output_layout", "unified")
     assert Store(tmp_path).setting("output_layout") == "unified"
-

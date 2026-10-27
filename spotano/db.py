@@ -60,11 +60,22 @@ class Store:
                 db.execute("""INSERT OR IGNORE INTO download_membership
                     SELECT m.playlist_id,m.track_id,t.metadata FROM membership m
                     JOIN tracks t ON t.id=m.track_id""")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(tracks)")}
+            if "tagged" not in columns:
+                db.execute("ALTER TABLE tracks ADD COLUMN tagged INTEGER NOT NULL DEFAULT 1")
+            if "classified" not in columns:
+                db.execute("ALTER TABLE tracks ADD COLUMN classified INTEGER NOT NULL DEFAULT 0")
+                db.execute("UPDATE tracks SET classified=1 WHERE path IS NOT NULL")
             db.execute("INSERT OR IGNORE INTO settings VALUES('revision', '0')")
-            db.execute("INSERT OR IGNORE INTO settings VALUES('by_genre', 'true')")
+            db.execute(
+                "INSERT OR IGNORE INTO settings VALUES('download_options', ?)",
+                (json.dumps({"categories": False, "artists": False, "metadata": False}),),
+            )
             db.execute("INSERT OR IGNORE INTO settings VALUES('musicbrainz', 'true')")
-            db.execute("INSERT OR IGNORE INTO settings VALUES('output_layout', ?)",
-                       (json.dumps("playlists" if new_catalog else "unified"),))
+            db.execute(
+                "INSERT OR IGNORE INTO settings VALUES('output_layout', ?)",
+                (json.dumps("playlists" if new_catalog else "unified"),),
+            )
             db.execute("INSERT OR IGNORE INTO settings VALUES('download_workers', '2')")
             db.execute("INSERT OR IGNORE INTO settings VALUES('conversion_workers', '2')")
 
@@ -159,8 +170,10 @@ class Store:
         from .matching import fingerprint
 
         with self.connect() as db:
-            db.execute("INSERT OR REPLACE INTO audio_matches VALUES(?,?,?,?)",
-                       (metadata["song_id"], fingerprint(metadata), json.dumps(evidence), time.time()))
+            db.execute(
+                "INSERT OR REPLACE INTO audio_matches VALUES(?,?,?,?)",
+                (metadata["song_id"], fingerprint(metadata), json.dumps(evidence), time.time()),
+            )
 
     def set_audio_source(self, track_id, url):
         from .matching import canonical_youtube

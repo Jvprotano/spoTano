@@ -5,6 +5,7 @@ import hashlib
 import importlib.metadata
 import json
 import subprocess
+import tomllib
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -37,7 +38,8 @@ def main():
     dists = list(importlib.metadata.distributions())
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         sources = [p for p in pool.map(download, dists) if p]
-    archive = ROOT / "dist" / "spoTano-1.0.0-source.zip"
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    archive = ROOT / "dist" / f"spoTano-{version}-source.zip"
     archive.parent.mkdir(exist_ok=True)
     tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode().split("\0")
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:

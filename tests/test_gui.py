@@ -88,8 +88,21 @@ def test_layout_preview_and_custom_group_are_persisted(app, monkeypatch):
     app.layout.set("Pastas por grupo")
     app.change_layout()
     assert all(row["output_group"] == "Viagem" for row in app.store.playlists())
-    assert "spoTano/Viagem/Categoria/Música.mp3" in app.output_preview.get()
+    assert "spoTano/Viagem/Música.mp3" in app.output_preview.get()
     assert app.store.setting("output_layout") == "groups"
+
+
+def test_export_schedules_reorganization_and_preview(app, monkeypatch, tmp_path):
+    calls = []
+    marker = object()
+    app.destination.set(str(tmp_path))
+    monkeypatch.setattr(app.library, "reorganize", lambda: calls.append("reorganize"))
+    monkeypatch.setattr(app.exporter, "preview", lambda path: calls.append(path) or marker)
+    app.run = lambda work, done: calls.append((work, done))
+    app.export()
+    work, done = calls.pop()
+    assert callable(done) and work() is marker
+    assert calls == ["reorganize", tmp_path]
 
 
 def test_removing_selected_playlist_also_clears_checkbox(app, monkeypatch):
@@ -121,7 +134,7 @@ def test_minimum_window_shows_playlist_rows_and_export_action(app):
     app.toggle_logs()
     assert int(app.log_text["height"]) == 12
     app.toggle_logs()
-    assert int(app.log_text["height"]) == 4
+    assert int(app.log_text["height"]) == 3
 
 
 def test_batch_progress_stays_visible_across_track_messages_and_cancel(app):
@@ -195,8 +208,9 @@ def test_changed_playlist_controls_and_folder_explanation_fit_minimum_window(app
     app.layout.set("Coleção unificada")
     app.change_layout()
     assert "todas as playlists ficam juntas" in app.folder_hint.get()
-    assert all(app.playlists.set(i, "Pasta na exportação") == "Todas juntas"
-               for i in app.playlists.get_children())
+    assert all(
+        app.playlists.set(i, "Pasta na exportação") == "Todas juntas" for i in app.playlists.get_children()
+    )
 
 
 def test_green_progress_and_folder_shortcuts_use_actual_download_and_export_paths(app, monkeypatch, tmp_path):
@@ -242,8 +256,15 @@ def test_audio_source_search_and_explicit_download_persist_choice(app):
     track_id = next(iter(app.track_rows))
     app.tracks.selection_set(track_id)
     app.library.validator = lambda path: None
-    app.library.provider.candidates = lambda metadata: [{"url": "https://www.youtube.com/watch?v=abcdefghijk",
-        "name": "Recording", "artist": "Artist", "duration": 180, "score": 99}]
+    app.library.provider.candidates = lambda metadata: [
+        {
+            "url": "https://www.youtube.com/watch?v=abcdefghijk",
+            "name": "Recording",
+            "artist": "Artist",
+            "duration": 180,
+            "score": 99,
+        }
+    ]
     app.audio_source()
     dialog = next(w for w in app.root.winfo_children() if isinstance(w, tk.Toplevel))
     widgets = descendants(dialog)
@@ -254,9 +275,13 @@ def test_audio_source_search_and_explicit_download_persist_choice(app):
     candidates.selection_set("0")
     candidates.event_generate("<<TreeviewSelect>>")
     app.root.update()
-    next(w for w in widgets if isinstance(w, ttk.Button) and w.cget("text") == "Baixar esta gravação").invoke()
+    next(
+        w for w in widgets if isinstance(w, ttk.Button) and w.cget("text") == "Baixar esta gravação"
+    ).invoke()
     pump_until_done(app)
-    assert app.store.rows("SELECT url FROM audio_sources WHERE track_id=?", (track_id,))[0]["url"].endswith("abcdefghijk")
+    assert app.store.rows("SELECT url FROM audio_sources WHERE track_id=?", (track_id,))[0]["url"].endswith(
+        "abcdefghijk"
+    )
     assert len(list(app.library.music.rglob("*.mp3"))) == 1
 
 
@@ -293,6 +318,7 @@ def test_settings_scroll_reaches_actions_at_minimum_size(app):
     canvas = next(w for w in descendants(app.settings_tab) if isinstance(w, tk.Canvas))
     canvas.yview_moveto(1)
     app.root.update()
-    help_button = next(w for w in app.controls if isinstance(w, ttk.Button)
-                       and w.cget("text") == "Ajuda e atualizações ↗")
+    help_button = next(
+        w for w in app.controls if isinstance(w, ttk.Button) and w.cget("text") == "Ajuda e atualizações ↗"
+    )
     assert help_button.winfo_rooty() + help_button.winfo_height() < app.log_text.winfo_rooty()

@@ -97,9 +97,14 @@ class WarmDownload:
                 self.events.seek(position)
                 return received
             message = json.loads(line)["message"]
-            phases = {"Buscando correspondência": "search", "Obtendo informações": "extraction",
-                      "Recebendo áudio": "transfer", "Convertendo com FFmpeg": "conversion",
-                      "Aguardando vaga": "conversion_queue", "Gravando tags": "tags"}
+            phases = {
+                "Buscando correspondência": "search",
+                "Obtendo informações": "extraction",
+                "Recebendo áudio": "transfer",
+                "Convertendo com FFmpeg": "conversion",
+                "Aguardando vaga": "conversion_queue",
+                "Gravando tags": "tags",
+            }
             phase = next((value for prefix, value in phases.items() if str(message).startswith(prefix)), None)
             if phase and phase != self.phase:
                 self.phase, self.phase_started = phase, time.monotonic()
@@ -116,7 +121,9 @@ class WarmDownload:
             try:
                 result = self._download(metadata, output, timeout=remaining)
                 if isinstance(result, dict):
-                    result.setdefault("metrics", {}).update(worker_restarts=len(exits), worker_exit_codes=exits)
+                    result.setdefault("metrics", {}).update(
+                        worker_restarts=len(exits), worker_exit_codes=exits
+                    )
                 return result
             except WorkerExited as exc:
                 exits.append(exc.code)
@@ -124,8 +131,10 @@ class WarmDownload:
                     raise
                 if self.cancel.is_set():
                     raise Cancelled("Operação cancelada; arquivos anteriores preservados.") from exc
-                self.progress(f"{metadata['artist']} — {metadata['name']} · {exc} "
-                              "Reiniciando o mecanismo e repetindo esta faixa uma única vez.")
+                self.progress(
+                    f"{metadata['artist']} — {metadata['name']} · {exc} "
+                    "Reiniciando o mecanismo e repetindo esta faixa uma única vez."
+                )
 
     def _download(self, metadata, output, timeout=480):
         label = f"{metadata['artist']} — {metadata['name']}"
@@ -165,14 +174,29 @@ class WarmDownload:
                     raise TimeoutError(
                         "O provedor excedeu o tempo limite; o mecanismo será reiniciado na próxima faixa."
                     )
-                phase_limits = {"prepare": 60, "search": 90, "extraction": 90, "transfer": 120,
-                                "conversion_queue": 125, "conversion": 180, "tags": 30}
+                phase_limits = {
+                    "prepare": 60,
+                    "search": 90,
+                    "extraction": 90,
+                    "transfer": 120,
+                    "conversion_queue": 125,
+                    "conversion": 180,
+                    "tags": 30,
+                }
                 if current - self.phase_started > phase_limits[self.phase]:
-                    label = {"prepare": "preparação", "search": "busca", "extraction": "extração",
-                             "transfer": "transferência", "conversion": "conversão",
-                             "conversion_queue": "fila de conversão", "tags": "gravação de tags"}[self.phase]
-                    raise TimeoutError(f"Etapa de {label} excedeu {phase_limits[self.phase]}s; "
-                                       "mecanismo será reiniciado. Diagnóstico preservado na execução.")
+                    label = {
+                        "prepare": "preparação",
+                        "search": "busca",
+                        "extraction": "extração",
+                        "transfer": "transferência",
+                        "conversion": "conversão",
+                        "conversion_queue": "fila de conversão",
+                        "tags": "gravação de tags",
+                    }[self.phase]
+                    raise TimeoutError(
+                        f"Etapa de {label} excedeu {phase_limits[self.phase]}s; "
+                        "mecanismo será reiniciado. Diagnóstico preservado na execução."
+                    )
                 if self.process.poll() is not None and not response.exists():
                     self.log.flush()
                     with (self.root / "worker.log").open("rb") as stream:
@@ -281,7 +305,7 @@ class DownloadEngine:
                     "format": "mp3",
                     "bitrate": "192k",
                     "ffmpeg": str(ffmpeg),
-                    "ffmpeg_args": "-ar 44100 -ac 2 -id3v2_version 3",
+                    "ffmpeg_args": "-map_metadata -1 -ar 44100 -ac 2 -id3v2_version 3",
                     "threads": 1,
                     "lyrics_providers": [],
                     "audio_providers": ["youtube-music", "youtube"],
@@ -384,17 +408,29 @@ class DownloadEngine:
             song.download_url = candidate["url"]
             self.downloader.errors.clear()
             self.provider_error = ""
-            self.downloader.progress_handler = download_progress(self.progress, self.phase,
-                                                                 self.capture_error)
-            self.progress(f"Correspondência · tentativa {attempt + 1}/3 · "
-                          + ("fonte escolhida" if manual else f"{candidate.get('score', 100):.1f} pontos"))
+            self.downloader.progress_handler = download_progress(
+                self.progress, self.phase, self.capture_error
+            )
+            self.progress(
+                f"Correspondência · tentativa {attempt + 1}/3 · "
+                + ("fonte escolhida" if manual else f"{candidate.get('score', 100):.1f} pontos")
+            )
             self.progress("Obtendo informações do áudio")
             self.phase("extraction")
-            _, path = self.downloader.download_song(song)
+            # The Library owns optional tags; this worker handles one song at a time.
+            import spotdl.download.downloader as sdk_downloader
+
+            original_embed = sdk_downloader.embed_metadata
+            sdk_downloader.embed_metadata = lambda *args, **kwargs: None
+            try:
+                _, path = self.downloader.download_song(song)
+            finally:
+                sdk_downloader.embed_metadata = original_embed
             if path is not None and Path(path).is_file():
                 break
-            reason = self.provider_error or (self.downloader.errors[-1] if self.downloader.errors
-                                             else "Mecanismo sem arquivo de saída")
+            reason = self.provider_error or (
+                self.downloader.errors[-1] if self.downloader.errors else "Mecanismo sem arquivo de saída"
+            )
             failures.append(safe_error(RuntimeError(reason)))
             self.progress("Tentativa falhou · " + failures[-1])
             if manual or metadata.get("download_url"):
@@ -414,8 +450,9 @@ class DownloadEngine:
         self.phase("finished")
         self.metrics.update(self.matcher.stats)
         self.metrics["total_s"] = round(time.monotonic() - started, 3)
-        self.metrics["cache_hit"] = bool(metadata.get("_cached_match")
-                                         and match["url"] == metadata["_cached_match"]["url"])
+        self.metrics["cache_hit"] = bool(
+            metadata.get("_cached_match") and match["url"] == metadata["_cached_match"]["url"]
+        )
         self.metrics["attempts"] = len(tried)
         self.progress(f"Busca, transferência e conversão: {time.monotonic() - started:.1f}s.")
         return {"output": str(target), "match": match, "metrics": self.metrics}
@@ -430,19 +467,31 @@ class DownloadEngine:
         metrics.update(self.matcher.stats)
         stage = getattr(self, "stage", "prepare")
         if hasattr(self, "stage_started"):
-            metrics[stage + "_s"] = round(metrics.get(stage + "_s", 0)
-                                          + time.monotonic() - self.stage_started, 3)
+            metrics[stage + "_s"] = round(
+                metrics.get(stage + "_s", 0) + time.monotonic() - self.stage_started, 3
+            )
         metrics["total_s"] = round(time.monotonic() - getattr(self, "track_started", time.monotonic()), 3)
-        return sanitize({"stage": getattr(self, "failed_phase", None) or stage, "metrics": metrics,
-                         "match": getattr(self, "active_match", None),
-                         "candidates": self.matcher.last_candidates})
+        return sanitize(
+            {
+                "stage": getattr(self, "failed_phase", None) or stage,
+                "metrics": metrics,
+                "match": getattr(self, "active_match", None),
+                "candidates": self.matcher.last_candidates,
+            }
+        )
 
     def phase(self, stage):
         if stage == "Error":
             self.failed_phase = self.stage
-        stage = {"Searching for song": "search", "Getting audio meta": "extraction",
-                 "Downloading": "transfer", "Converting": "conversion", "Embedding metadata": "tags",
-                 "Done": "validation_pending", "Error": "error"}.get(stage, stage)
+        stage = {
+            "Searching for song": "search",
+            "Getting audio meta": "extraction",
+            "Downloading": "transfer",
+            "Converting": "conversion",
+            "Embedding metadata": "tags",
+            "Done": "validation_pending",
+            "Error": "error",
+        }.get(stage, stage)
         if stage == self.stage:
             return
         current = time.monotonic()
@@ -480,7 +529,9 @@ def session_worker(root, progress, settings=None):
                     engine = DownloadEngine(root, progress, settings)
                 answer = {"result": engine.download(job["metadata"], job["output"])}
             except Exception as exc:
-                diagnostic = engine.diagnostic() if engine is not None and hasattr(engine, "diagnostic") else {}
+                diagnostic = (
+                    engine.diagnostic() if engine is not None and hasattr(engine, "diagnostic") else {}
+                )
                 answer = {"error": safe_error(exc), "diagnostic": diagnostic}
             atomic_json(root / f"result-{int(job['sequence'])}.json", answer)
     finally:

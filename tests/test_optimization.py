@@ -25,14 +25,28 @@ from spotano.telemetry import sanitize
 def result(name="Song", artist="Artist", duration=180, video="abcdefghijk", **kwargs):
     from spotdl.types.result import Result
 
-    return Result(source="YouTubeMusic", url="https://www.youtube.com/watch?v=" + video,
-                  name=name, author=artist, artists=(artist,), duration=duration,
-                  verified=True, result_id=video, **kwargs)
+    return Result(
+        source="YouTubeMusic",
+        url="https://www.youtube.com/watch?v=" + video,
+        name=name,
+        author=artist,
+        artists=(artist,),
+        duration=duration,
+        verified=True,
+        result_id=video,
+        **kwargs,
+    )
 
 
 def metadata(**kwargs):
-    return {"song_id": A, "name": "Song", "artist": "Artist", "artists": ["Artist"],
-            "duration": 180, **kwargs}
+    return {
+        "song_id": A,
+        "name": "Song",
+        "artist": "Artist",
+        "artists": ["Artist"],
+        "duration": 180,
+        **kwargs,
+    }
 
 
 def test_confident_first_page_never_extracts_views_or_calls_second_provider():
@@ -54,11 +68,18 @@ def test_confident_first_page_never_extracts_views_or_calls_second_provider():
     assert selected[0]["score"] == 100 and matcher.stats["view_extractions"] == 0
 
 
-@pytest.mark.parametrize("candidate", [
-    result(name="Song (Cover)"), result(name="Song - Live"), result(name="Song Remix"),
-    result(name="Song (Slowed + Reverb)"), result(artist="Someone Else"),
-    result(duration=90), result(name="Unrelated Title"),
-])
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        result(name="Song (Cover)"),
+        result(name="Song - Live"),
+        result(name="Song Remix"),
+        result(name="Song (Slowed + Reverb)"),
+        result(artist="Someone Else"),
+        result(duration=90),
+        result(name="Unrelated Title"),
+    ],
+)
 def test_fast_matching_rejects_wrong_recordings(candidate):
     assert rank_candidate(metadata(), candidate) is None
 
@@ -102,9 +123,16 @@ def test_cache_follows_identity_and_matcher_version_and_manual_choice(tmp_path):
     assert not store.rows("SELECT * FROM audio_sources")
 
 
-@pytest.mark.parametrize("value", ["http://youtu.be/abcdefghijk", "https://evil.test/abcdefghijk",
-                                    "https://youtube.com/playlist?list=abc", "https://youtube.com/watch?v=short",
-                                    "https://user:pass@youtube.com/watch?v=abcdefghijk"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://youtu.be/abcdefghijk",
+        "https://evil.test/abcdefghijk",
+        "https://youtube.com/playlist?list=abc",
+        "https://youtube.com/watch?v=short",
+        "https://user:pass@youtube.com/watch?v=abcdefghijk",
+    ],
+)
 def test_manual_sources_are_only_canonical_video_urls(value):
     with pytest.raises(ValueError):
         canonical_youtube(value)
@@ -136,16 +164,25 @@ def test_cached_extraction_failure_falls_back_without_repeating_bad_candidate(tm
 
     engine.downloader = Downloader()
     engine.matcher = SimpleNamespace(stats={}, candidates=candidates)
-    response = engine.download(metadata(_cached_match={"url": "https://www.youtube.com/watch?v=abcdefghijk"}),
-                               tmp_path / "final.mp3")
+    response = engine.download(
+        metadata(_cached_match={"url": "https://www.youtube.com/watch?v=abcdefghijk"}), tmp_path / "final.mp3"
+    )
     assert len(calls) == 2 and len(set(calls)) == 2
     assert response["metrics"]["attempts"] == 2
     assert response["match"]["url"].endswith("bcdefghijkl")
 
 
 def test_weighted_genres_specific_styles_and_country_evidence():
-    assert classify([{"name": "country", "count": 3}, {"name": "southern rock", "count": 1},
-                     {"name": "bluegrass", "count": 1}]) == "Country e Folk"
+    assert (
+        classify(
+            [
+                {"name": "country", "count": 3},
+                {"name": "southern rock", "count": 1},
+                {"name": "bluegrass", "count": 1},
+            ]
+        )
+        == "Country e Folk"
+    )
     assert classify([{"name": "latin", "count": 3}, {"name": "sertanejo", "count": 2}]) == "Sertanejo"
     assert classify(["agrofunk"]) == "Funk Brasileiro"
 
@@ -153,8 +190,10 @@ def test_weighted_genres_specific_styles_and_country_evidence():
 def test_other_artist_cache_hit_does_not_wait_for_slow_network(tmp_path, monkeypatch):
     store = Store(tmp_path)
     with store.connect() as db:
-        db.execute("INSERT INTO genre_cache VALUES(?,?,?)",
-                   ("cached", json.dumps({"version": GENRE_VERSION, "tags": ["sertanejo"]}), time.time()))
+        db.execute(
+            "INSERT INTO genre_cache VALUES(?,?,?)",
+            ("cached", json.dumps({"version": GENRE_VERSION, "tags": ["sertanejo"]}), time.time()),
+        )
     resolver = GenreResolver(store)
     entered, release = threading.Event(), threading.Event()
 
@@ -218,6 +257,7 @@ def test_optional_lastfm_has_weighted_tags_and_does_not_leak_key(tmp_path, monke
 
 def make_library(tmp_path):
     store = Store(tmp_path / "data")
+    store.set_setting("download_options", {"categories": True})
     store.set_setting("musicbrainz", False)
     store.add_playlist(P1)
     provider = FakeProvider()
@@ -252,7 +292,9 @@ def test_interrupted_install_is_recovered_before_next_run(tmp_path, monkeypatch)
     assert not resumed.store.rows("SELECT * FROM file_transitions")
 
 
-def test_interruption_before_replace_keeps_previous_audio_and_cleans_incomplete_journal(tmp_path, monkeypatch):
+def test_interruption_before_replace_keeps_previous_audio_and_cleans_incomplete_journal(
+    tmp_path, monkeypatch
+):
     store, provider, lib = make_library(tmp_path)
     before = store.tracks()[0]
     with store.connect() as db:
@@ -344,9 +386,27 @@ def real_audio(tmp_path):
         audio.setframerate(44100)
         audio.writeframes(b"\x00\x00\x00\x00" * 44100)
     target = tmp_path / "sample.mp3"
-    subprocess.run([ffmpeg, "-y", "-i", str(source), "-c:a", "libmp3lame", "-b:a", "192k",
-                    "-ar", "44100", "-ac", "2", "-id3v2_version", "3", str(target)],
-                   capture_output=True, check=True)
+    subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(source),
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "192k",
+            "-ar",
+            "44100",
+            "-ac",
+            "2",
+            "-id3v2_version",
+            "3",
+            str(target),
+        ],
+        capture_output=True,
+        check=True,
+    )
     return target
 
 
@@ -354,6 +414,7 @@ def test_tag_correction_preserves_profile_updates_hash_and_export_without_redown
     from mutagen.id3 import ID3
 
     store = Store(tmp_path / "data")
+    store.set_setting("download_options", {"categories": True, "metadata": True})
     store.set_setting("musicbrainz", False)
     store.add_playlist(P1)
 
