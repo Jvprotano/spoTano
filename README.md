@@ -4,9 +4,9 @@ Sua música, com você. Aplicação desktop open-source para acompanhar playlist
 Spotify, manter uma biblioteca MP3 organizada e exportar diferenças para um
 pendrive ou outra pasta. Interface em português, sem conta spoTano ou IA paga.
 
-## Versão 1.3.0
+## Versão 1.3.1
 
-Pacote local desta implementação: `dist/spoTano-1.3.0-windows-x64.zip`.
+Pacote local desta implementação: `dist/spoTano-1.3.1-windows-x64.zip`.
 
 **Baixar / retomar** continua lotes interrompidos sem repetir os MP3s concluídos,
 inclusive substituições iniciadas em Baixar tudo. A Biblioteca permite classificar
