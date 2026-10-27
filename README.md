@@ -102,18 +102,25 @@ As colunas mostram o total de faixas, quantas têm arquivo local e a data do úl
 download concluído; selecionar uma linha mostra a última consulta e observações.
 
 Use as caixas da coluna **Marcar** (ou Espaço), **Marcar todas** e **Desmarcar**.
-**Baixar tudo** fica disponível quando há playlists marcadas. **Atualizar selecionadas**
-é liberado quando todas as marcadas já tiveram um download concluído;
-para uma seleção com download parcial, a ação aparece como **Continuar download**.
-Se a seleção inclui uma playlist sem nenhum áudio local e sem download concluído,
-use **Baixar tudo** para o primeiro download. **Atualizar selecionadas**
-consulta somente elas, mostra as diferenças e baixa apenas faixas ausentes ou
-cujo arquivo falhou na verificação. As demais playlists preservam seu estado.
+**Atualizar selecionadas** consulta somente as marcadas, salva a lista atual e
+verifica diferenças e integridade local. **Não baixa nem remove áudios.** Está
+disponível mesmo antes do primeiro download. Depois da consulta, quando houver
+mudanças ou pendências, aparecem mais duas ações além de **Baixar tudo**:
+
+- **Baixar novas**: baixa faixas novas, ausentes ou inválidas e mantém na biblioteca
+  os arquivos das faixas que saíram da playlist.
+- **Baixar e remover excluídas**: baixa as pendências e move para a lixeira local
+  os arquivos das faixas que saíram. Preserva músicas usadas ou mantidas por outras
+  playlists. Se algum download falhar, nenhuma remoção é executada.
+
+As duas ações usam a última lista salva, sem outra consulta ao Spotify. A prévia
+mostra os downloads e os caminhos que serão movidos. É possível baixar novas agora
+e escolher remover as excluídas depois, inclusive após reiniciar o aplicativo.
 Uma faixa com o mesmo Spotify ID em várias playlists ocupa um só arquivo interno.
 Remover de uma delas não afeta as demais.
 
-A prévia lista as playlists incluídas, inclusões e saídas desde o último download
-concluído, arquivos reutilizados e downloads necessários. Na primeira vez, todas
+A prévia lista as playlists incluídas, inclusões e saídas em relação aos downloads
+mantidos, arquivos reutilizados e downloads necessários. Na primeira vez, todas
 as faixas são inclusões. Uma falha parcial preserva a referência anterior para
 a próxima comparação; cada playlist conclui independentemente das demais. Para
 catálogos antigos, a referência inicial é a última lista salva, indicada na prévia,
@@ -125,12 +132,12 @@ compartilhadas entre elas. A prévia informa a data da última leitura. Para bus
 mudanças na playlist, use **Atualizar selecionadas**. Os
 arquivos anteriores são mantidos até o novo MP3 ser validado. Um download que
 falha não impede os seguintes; o erro aparece na Biblioteca. Se o arquivo antigo
-continua íntegro, ele permanece utilizável; **Atualizar** ou **Continuar download**
+continua íntegro, ele permanece utilizável; **Baixar novas**
 o reutiliza. Use **Baixar tudo** ou **Associar MP3 local** para tentar substituir esse arquivo depois.
 
 O estado persiste entre execuções. Fechar durante uma operação solicita
-cancelamento. Ao abrir novamente, **Continuar download** ou **Atualizar selecionadas**
-detecta o que ainda falta. A leitura
+cancelamento. Ao abrir novamente, **Atualizar selecionadas** verifica o que falta e
+**Baixar novas** retoma as pendências. A leitura
 incompleta de qualquer playlist aborta toda a prévia e preserva o snapshot anterior.
 Playlists vazias completas são válidas; itens indisponíveis tornam remoções
 ambíguas e bloqueiam aquela atualização por segurança.
@@ -208,6 +215,9 @@ selecionada, sem precisar encontrar uma correspondência em outro provedor.
    (`spoTano/Playlist/Categoria/Música.mp3`) ou **Pastas por grupo**
    (`spoTano/Grupo/Categoria/Música.mp3`). Com organização por artista, o artista
    ocupa o lugar da categoria. Os exemplos na tela mostram as pastas reais.
+   Novos catálogos usam **Uma pasta por playlist** por padrão; configurações
+   existentes são mantidas. A coluna **Pasta na exportação** e o aviso na aba
+   Playlists mostram se as coleções ficarão separadas ou juntas.
 2. Para personalizar, marque playlists na aba Playlists e clique **Pasta / grupo…**.
    O mesmo nome reúne playlists no modo por grupo; no modo por playlist, define
    o nome individual da pasta. Nomes iguais de playlists recebem um sufixo para
@@ -222,6 +232,10 @@ selecionada, sem precisar encontrar uma correspondência em outro provedor.
 É possível escolher uma pasta no computador, sem pendrive. A exportação representa
 **todas as playlists importadas**; as caixas controlam as ações de download e a
 personalização de nomes. A biblioteca interna em `Music` continua compartilhada.
+**Baixar duas playlists mantém seus áudios juntos nessa biblioteca**, por gênero
+ou artista. Para obter pastas separadas, exporte para uma pasta do computador ou
+pendrive usando **Uma pasta por playlist**. Para reunir algumas playlists, escolha
+**Pastas por grupo** e atribua o mesmo grupo às desejadas.
 Na saída por playlist, uma faixa compartilhada aparece em cada pasta; por grupo,
 aparece uma vez em cada grupo; na coleção unificada, uma vez no total. Mudar o modo
 reutiliza áudios, sem baixá-los novamente. O novo modo só muda o destino após a

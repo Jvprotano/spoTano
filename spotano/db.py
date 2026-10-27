@@ -42,6 +42,7 @@ class Store:
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "library.sqlite3"
+        new_catalog = not self.path.exists()
         with self.connect() as db:
             db.executescript(SCHEMA)
             db.execute("PRAGMA journal_mode=WAL")
@@ -62,7 +63,8 @@ class Store:
             db.execute("INSERT OR IGNORE INTO settings VALUES('revision', '0')")
             db.execute("INSERT OR IGNORE INTO settings VALUES('by_genre', 'true')")
             db.execute("INSERT OR IGNORE INTO settings VALUES('musicbrainz', 'true')")
-            db.execute("INSERT OR IGNORE INTO settings VALUES('output_layout', '\"unified\"')")
+            db.execute("INSERT OR IGNORE INTO settings VALUES('output_layout', ?)",
+                       (json.dumps("playlists" if new_catalog else "unified"),))
             db.execute("INSERT OR IGNORE INTO settings VALUES('download_workers', '2')")
             db.execute("INSERT OR IGNORE INTO settings VALUES('conversion_workers', '2')")
 

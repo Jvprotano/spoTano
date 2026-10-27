@@ -210,6 +210,7 @@ def test_cancellation_preserves_existing_files(collection):
 
 def test_export_incremental_and_managed_removal(collection, tmp_path):
     store, provider, lib = collection
+    store.set_setting("output_layout", "unified")
     store.add_playlist(P2)
     lib.apply(lib.preview())
     destination = tmp_path / "usb"
@@ -483,6 +484,7 @@ def test_distinct_group_labels_survive_normalization_and_do_not_merge(collection
 
 def test_layout_change_preserves_previous_output_in_trash_and_rejects_stale_plan(collection, tmp_path):
     store, _, lib = collection
+    store.set_setting("output_layout", "unified")
     lib.apply(lib.preview())
     exporter = Exporter(lib)
     old = exporter.preview(tmp_path)

@@ -34,6 +34,9 @@ def app(tmp_path, tk_session):
     instance.library.import_playlist(P2)
     instance.refresh()
     yield instance
+    instance.cancel.set()
+    pump_until_done(instance)
+    instance.progress.stop()
     for timer in window.tk.call("after", "info"):
         window.after_cancel(timer)
     window.destroy()
@@ -44,7 +47,7 @@ def test_checkbox_selection_controls_actions_and_survives_refresh(app):
     app.playlists.focus("1")
     app.toggle_playlist(SimpleNamespace(keysym="space"))
     assert app.checked_playlists == {1}
-    assert str(app.update_button["state"]) == "disabled"
+    assert str(app.update_button["state"]) == "normal"
     assert str(app.force_button["state"]) == "normal"
     assert app.force_button.cget("text") == "Baixar tudo"
     app.refresh()
@@ -137,33 +140,63 @@ def test_batch_progress_stays_visible_across_track_messages_and_cancel(app):
     assert not app.busy and float(app.progress["value"]) == 7
 
 
-def test_update_requires_started_selection_and_partial_download_can_resume(app):
+def test_refresh_only_then_explicit_partial_download_can_resume(app):
+    reviews = []
+    app.review = lambda *args: reviews.append(args)
     app.checked_playlists = {2}
     app.refresh_checks()
-    app.sync(False)
-    assert not app.busy  # First download cannot accidentally invoke Update.
+    app.update_button.invoke()
+    pump_until_done(app)
+    assert app.library.provider.downloads == []
+    assert app.new_button.winfo_manager() == "pack"
+    assert app.incremental_actions.winfo_manager() == "pack"
+    assert "Nenhum áudio" in reviews[-1][1]
     app.library.validator = lambda path: None
     app.library.provider.fail.add("B" * 22)
-    app.library.apply(app.library.preview(True, playlist_ids=[2]))
-    app.refresh()
-    assert app.update_button.cget("text") == "Continuar download"
-    assert str(app.update_button["state"]) == "normal"
-    app.library.provider.fail.clear()
-    app.library.apply(app.library.preview(playlist_ids=[2]))
+    app.library.apply(app.library.preview(True, playlist_ids=[2], saved=True))
     app.refresh()
     assert app.update_button.cget("text") == "Atualizar selecionadas"
+    assert str(app.new_button["state"]) == "normal"
     assert str(app.update_button["state"]) == "normal"
+    app.library.provider.fail.clear()
+    app.library.apply(app.library.preview(playlist_ids=[2], saved=True))
+    app.refresh()
+    assert app.incremental_actions.winfo_manager() == ""
 
 
-def test_mixed_selection_with_new_playlist_does_not_enable_update(app):
+def test_refresh_is_available_for_mixed_and_new_playlists(app):
     with app.store.connect() as db:
         db.execute("UPDATE playlists SET downloaded_at='2026-10-26T00:00:00+00:00' WHERE id=1")
     app.checked_playlists = {1}
     app.refresh()
     assert str(app.update_button["state"]) == "normal"
     app.mark_playlists(True)
-    assert str(app.update_button["state"]) == "disabled"
+    assert str(app.update_button["state"]) == "normal"
     assert str(app.force_button["state"]) == "normal"
+
+
+def test_changed_playlist_controls_and_folder_explanation_fit_minimum_window(app):
+    app.root.geometry("1000x760")
+    app.root.deiconify()
+    app.verified_playlists = {1, 2}
+    app.mark_playlists(True)
+    app.refresh()
+    app.root.update()
+    assert app.playlists.bbox("2")
+    assert app.incremental_actions.winfo_ismapped()
+    for button in (app.update_button, app.force_button, app.new_button, app.mirror_button):
+        assert button.winfo_rooty() > app.playlists.winfo_rooty()
+        assert button.winfo_rootx() + button.winfo_width() < app.root.winfo_rootx() + app.root.winfo_width()
+        assert button.winfo_rooty() + button.winfo_height() < app.log_text.winfo_rooty()
+    assert "biblioteca compartilhada" in app.folder_hint.get()
+    assert "uma pasta separada por playlist" in app.folder_hint.get()
+    folders = [app.playlists.set(i, "Pasta na exportação") for i in app.playlists.get_children()]
+    assert folders[0] != folders[1]
+    app.layout.set("Coleção unificada")
+    app.change_layout()
+    assert "todas as playlists ficam juntas" in app.folder_hint.get()
+    assert all(app.playlists.set(i, "Pasta na exportação") == "Todas juntas"
+               for i in app.playlists.get_children())
 
 
 def test_green_progress_and_folder_shortcuts_use_actual_download_and_export_paths(app, monkeypatch, tmp_path):

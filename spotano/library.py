@@ -34,6 +34,9 @@ class SyncPlan:
     force: bool = False
     warnings: list = field(default_factory=list)
     refresh_metadata: bool = True
+    preserve_removed: bool = False
+    remove_missing: bool = False
+    cleanup: list = field(default_factory=list)
 
 
 class Library:
@@ -94,7 +97,7 @@ class Library:
     def import_playlist(self, url):
         url = playlist_url(url)
         if self.store.rows("SELECT id FROM playlists WHERE url=?", (url,)):
-            raise ValueError("Playlist já importada. Marque-a para baixar ou atualizar os áudios.")
+            raise ValueError("Playlist já importada. Marque-a para consultar mudanças ou baixar áudios.")
         self.progress("Importando playlist: consultando nome e faixas no Spotify…")
         snapshot = self.provider.playlist(url)
         self.validate_snapshot(snapshot)
@@ -111,7 +114,7 @@ class Library:
         )
         return playlist_id
 
-    def preview(self, force=False, playlist_ids=None):
+    def preview(self, force=False, playlist_ids=None, saved=False, remove_missing=False):
         revision = self.store.setting("revision")
         playlists = self.store.playlists()
         if playlist_ids is not None:
@@ -121,11 +124,14 @@ class Library:
                 raise ValueError("Marque pelo menos uma playlist válida.")
         if not playlists:
             raise ValueError("Adicione pelo menos uma playlist.")
-        plan = SyncPlan(revision=revision, snapshots=[], force=force, refresh_metadata=not force)
+        plan = SyncPlan(
+            revision=revision, snapshots=[], force=force, refresh_metadata=not (force or saved),
+            preserve_removed=saved, remove_missing=remove_missing,
+        )
         desired = {}
         for playlist in playlists:
             self.check_cancel()
-            if force:
+            if force or saved:
                 if not playlist["synced_at"]:
                     raise ValueError(
                         f"{playlist['name']}: use Atualizar selecionadas para consultar a lista primeiro."
@@ -148,7 +154,7 @@ class Library:
                 }
                 plan.warnings.append(
                     f"{playlist['name']}: usa a lista já salva; para buscar mudanças no Spotify, "
-                    "use Atualizar selecionadas após concluir o primeiro download."
+                    "use Atualizar selecionadas."
                 )
             else:
                 self.progress(f"Lendo {playlist['name']}…")
@@ -192,7 +198,7 @@ class Library:
             plan.snapshots.append((playlist["id"], snapshot))
             self.progress(
                 f"Lida: {snapshot['name']} · {len(ids)} faixas · "
-                f"{len(ids - old)} inclusões · {len(old - ids)} saídas desde o último download."
+                f"{len(ids - old)} inclusões · {len(old - ids)} saídas em relação aos downloads mantidos."
             )
         existing = {t["id"]: t for t in self.store.tracks()}
         for track_id, metadata in desired.items():
@@ -202,6 +208,8 @@ class Library:
                 plan.downloads.append(metadata)
             else:
                 plan.retained += 1
+        if remove_missing:
+            plan.cleanup = self.removal_candidates(plan)
         if revision != self.store.setting("revision"):
             raise ValueError("A biblioteca mudou durante a consulta. Gere outra prévia.")
         self.progress(
@@ -209,6 +217,51 @@ class Library:
             "Aguardando confirmação."
         )
         return plan
+
+    def refresh_playlists(self, playlist_ids):
+        """Read and verify all selected playlists before saving metadata, never audio."""
+        plan = self.preview(playlist_ids=playlist_ids)
+        self.check_cancel()
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            revision = int(db.execute("SELECT value FROM settings WHERE key='revision'").fetchone()[0])
+            if revision != plan.revision:
+                raise ValueError("Prévia desatualizada. Consulte as playlists novamente.")
+            for playlist_id, snapshot in plan.snapshots:
+                self.save_snapshot(db, playlist_id, snapshot)
+            missing = {track["song_id"] for track in plan.downloads}
+            for _, snapshot in plan.snapshots:
+                for track in snapshot["tracks"]:
+                    if track["song_id"] not in missing:
+                        db.execute("UPDATE tracks SET status='ready',error='' WHERE id=? AND status='pending'",
+                                   (track["song_id"],))
+            for track in plan.downloads:
+                db.execute("UPDATE tracks SET status='pending' WHERE id=?",
+                           (track["song_id"],))
+            self.store.bump(db)
+        plan.revision = revision + 1
+        plan.refresh_metadata = False
+        self.store.log("refresh", f"{len(plan.snapshots)} playlists consultadas; nenhum áudio alterado")
+        self.progress("Consulta concluída. Nenhum áudio foi baixado ou removido.")
+        return plan
+
+    def removal_candidates(self, plan):
+        """Only removed downloads owned exclusively by this selection can be quarantined."""
+        departing = set()
+        for playlist_id, snapshot in plan.snapshots:
+            current = {t["song_id"] for t in snapshot["tracks"]}
+            departing.update(
+                (playlist_id, row["track_id"])
+                for row in self.store.rows(
+                    "SELECT track_id FROM download_membership WHERE playlist_id=?", (playlist_id,)
+                ) if row["track_id"] not in current
+            )
+        candidates = {track_id for _, track_id in departing}
+        protected = {
+            row["track_id"] for row in self.store.rows("SELECT playlist_id,track_id FROM download_membership")
+            if (row["playlist_id"], row["track_id"]) not in departing
+        }
+        return [t for t in self.orphan_preview() if t["id"] in candidates - protected]
 
     def relative_path(self, track_id, metadata, category):
         folder = category if self.store.setting("by_genre", True) else safe_name(metadata["artist"])
@@ -247,6 +300,7 @@ class Library:
                 for playlist_id, snapshot in plan.snapshots:
                     self.save_snapshot(db, playlist_id, snapshot)
             self.store.bump(db)
+        resolver = GenreResolver(self.store, self.progress, self.cancel)
         failures = []
         total = len(plan.downloads)
         failed_ids = set()
@@ -401,15 +455,27 @@ class Library:
                         db.execute("UPDATE tracks SET category=? WHERE id=?", (category, track["id"]))
                         self.store.bump(db)
         self.reorganize()
+        removed = 0
+        # Download failures or cancellation must never trigger a removal phase.
+        if plan.remove_missing and not failures:
+            cleanup = self.removal_candidates(plan)
+            if {(t["id"], t["path"], t["sha256"]) for t in cleanup} != {
+                (t["id"], t["path"], t["sha256"]) for t in plan.cleanup
+            }:
+                raise ValueError("Os arquivos para remoção mudaram. Gere outra prévia; áudios preservados.")
+            if cleanup:
+                self.quarantine(cleanup, self.store.setting("revision"))
+                removed = len(cleanup)
         # Advance each playlist independently only after its entire download succeeds.
         for playlist_id, snapshot in plan.snapshots:
             self.check_cancel()
             if failed_ids.intersection(t["song_id"] for t in snapshot["tracks"]):
                 continue
             with self.store.connect() as db:
-                db.execute("DELETE FROM download_membership WHERE playlist_id=?", (playlist_id,))
+                if not plan.preserve_removed or (plan.remove_missing and not failures):
+                    db.execute("DELETE FROM download_membership WHERE playlist_id=?", (playlist_id,))
                 db.executemany(
-                    "INSERT OR IGNORE INTO download_membership VALUES(?,?,?)",
+                    "INSERT OR REPLACE INTO download_membership VALUES(?,?,?)",
                     [
                         (playlist_id, t["song_id"], json.dumps(t, ensure_ascii=False))
                         for t in snapshot["tracks"]
@@ -424,7 +490,8 @@ class Library:
             f"Finalizado: {total - len(failures)} downloads · {plan.retained} reutilizadas · "
             f"{len(failures)} falhas · {time.monotonic() - batch_started:.1f}s no lote."
         )
-        return {"downloaded": total - len(failures), "reused": plan.retained, "failures": failures}
+        return {"downloaded": total - len(failures), "reused": plan.retained, "failures": failures,
+                "removed": removed}
 
     def reorganize(self):
         pending = {json.loads(row["payload"])["track_id"]

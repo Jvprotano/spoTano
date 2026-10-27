@@ -158,7 +158,7 @@ class App:
         self.label(
             heading,
             "Importe. Selecione. Baixe.",
-            "Importar consulta nome e faixas. Marque as playlists e use Baixar tudo para obter os áudios.",
+            "Atualizar consulta o Spotify e verifica mudanças. Depois, escolha o que baixar nas playlists marcadas.",
         )
         form = ttk.Frame(parent)
         form.grid(row=1, column=0, sticky="ew")
@@ -176,14 +176,14 @@ class App:
         self.button(selection_bar, "Desmarcar", lambda: self.mark_playlists(False)).pack(side="left", padx=6)
         self.selection_summary = tk.StringVar(value="Nenhuma playlist marcada")
         ttk.Label(selection_bar, textvariable=self.selection_summary).pack(side="left", padx=10)
-        self.button(selection_bar, "Organizar saída…", lambda: self.tabs.select(self.export_tab)).pack(
+        self.button(selection_bar, "Organizar exportação…", lambda: self.tabs.select(self.export_tab)).pack(
             side="right"
         )
         self.group_button = self.button(selection_bar, "Pasta / grupo…", self.assign_group)
         self.group_button.pack(side="right", padx=8)
         self.playlists = self.tree(
             parent,
-            ("Marcar", "Playlist", "Faixas / locais", "Último download", "Pasta / grupo"),
+            ("Marcar", "Playlist", "Faixas / locais", "Último download", "Pasta na exportação"),
             (60, 320, 120, 190, 170),
             pack=False,
         )
@@ -202,10 +202,17 @@ class App:
         actions.grid(row=6, column=0, sticky="ew", pady=(6, 0))
         self.force_button = self.button(actions, "Baixar tudo", lambda: self.sync(True), True)
         self.force_button.pack(side="left")
-        self.update_button = self.button(actions, "Atualizar selecionadas", lambda: self.sync(False))
+        self.update_button = self.button(actions, "Atualizar selecionadas", self.refresh_selected)
         self.update_button.pack(side="left", padx=8)
         self.remove_button = self.button(actions, "Remover selecionadas", self.remove_playlist)
         self.remove_button.pack(side="right")
+        self.incremental_actions = ttk.Frame(actions)
+        self.new_button = self.button(self.incremental_actions, "Baixar novas", lambda: self.sync(False))
+        self.new_button.pack(side="left")
+        self.mirror_button = self.button(
+            self.incremental_actions, "Baixar e remover excluídas", lambda: self.sync(False, remove_missing=True)
+        )
+        self.mirror_button.pack(side="left", padx=8)
         self.download_hint = tk.StringVar()
         ttk.Label(
             parent,
@@ -213,6 +220,10 @@ class App:
             foreground="#63786c",
             wraplength=880,
         ).grid(row=7, column=0, sticky="w", pady=(6, 0))
+        self.folder_hint = tk.StringVar()
+        ttk.Label(parent, textvariable=self.folder_hint, foreground="#63786c", wraplength=880).grid(
+            row=2, column=0, sticky="w", pady=(6, 0)
+        )
 
     def build_library(self):
         parent = self.library_tab
@@ -280,7 +291,7 @@ class App:
         layout_bar.pack(fill="x")
         ttk.Label(layout_bar, text="Organização da saída:").pack(side="left", padx=(0, 8))
         self.layout = ttk.Combobox(layout_bar, values=list(LAYOUTS.values()), state="readonly", width=28)
-        self.layout.set(LAYOUTS[self.store.setting("output_layout", "unified")])
+        self.layout.set(LAYOUTS[self.store.setting("output_layout", "playlists")])
         self.layout.pack(side="left")
         self.layout.bind("<<ComboboxSelected>>", self.change_layout)
         self.controls.append(self.layout)
@@ -569,6 +580,7 @@ class App:
         playlists = self.store.playlists()
         self.playlist_rows = {str(p["id"]): p for p in playlists}
         self.checked_playlists.intersection_update(p["id"] for p in playlists)
+        folders = output_folders(playlists, self.store.setting("output_layout", "playlists"))
         for row in playlists:
             local = self.store.rows(
                 """SELECT COUNT(*) n FROM membership m JOIN tracks t ON t.id=m.track_id
@@ -576,6 +588,13 @@ class App:
                 (row["id"],),
             )[0]["n"]
             row["local_count"] = local
+            current = {r["track_id"] for r in self.store.rows(
+                "SELECT track_id FROM membership WHERE playlist_id=?", (row["id"],))}
+            baseline = {r["track_id"] for r in self.store.rows(
+                "SELECT track_id FROM download_membership WHERE playlist_id=?", (row["id"],))}
+            row["changes"] = current != baseline or local < row["count"] or bool(self.store.rows(
+                """SELECT 1 FROM membership m JOIN tracks t ON t.id=m.track_id
+                WHERE m.playlist_id=? AND t.status='pending' LIMIT 1""", (row["id"],)))
             self.playlists.insert(
                 "",
                 "end",
@@ -587,7 +606,7 @@ class App:
                     self.display_time(row["downloaded_at"])
                     if row["downloaded_at"]
                     else "Ainda não concluído",
-                    row["output_group"] or "Nome original / Sem grupo",
+                    folders[row["id"]] or "Todas juntas",
                 ),
             )
         tracks = self.store.tracks()
@@ -609,21 +628,22 @@ class App:
     def update_playlist_actions(self):
         count = len(self.checked_playlists)
         self.selection_summary.set(f"{count} playlist(s) marcada(s)" if count else "Nenhuma playlist marcada")
-        for button in (self.force_button, self.remove_button, self.group_button):
+        for button in (self.force_button, self.update_button, self.remove_button, self.group_button):
             button.configure(state="normal" if count and not self.busy else "disabled")
         selected = [self.playlist_rows[str(i)] for i in self.checked_playlists]
-        completed = bool(selected) and all(row["downloaded_at"] for row in selected)
-        started = bool(selected) and all(row["downloaded_at"] or row["local_count"] for row in selected)
-        self.update_button.configure(
-            text="Continuar download" if started and not completed else "Atualizar selecionadas",
-            state="normal" if started and not self.busy else "disabled",
-        )
-        if not started:
-            hint = "Primeiro download: use Baixar tudo. Atualizar fica disponível após baixar as playlists."
-        elif not completed:
-            hint = "Continuar download consulta o Spotify e baixa só o que falta, preservando os arquivos válidos."
+        changed = any(row["changes"] and (row["downloaded_at"] or row["local_count"]
+                      or row["id"] in getattr(self, "verified_playlists", set())) for row in selected)
+        for button in (self.new_button, self.mirror_button):
+            button.configure(state="normal" if changed and not self.busy else "disabled")
+        if changed:
+            self.incremental_actions.pack(side="left")
+            hint = ("Baixar novas mantém as excluídas na biblioteca. Ambas as ações retomam pendências.\n"
+                    "Baixar e remover excluídas também move as saídas para a lixeira; "
+                    "músicas compartilhadas são preservadas.")
         else:
-            hint = "Atualizar busca mudanças e baixa só o que falta. Baixar tudo baixa todas as faixas da lista salva."
+            self.incremental_actions.pack_forget()
+            hint = ("Atualizar apenas consulta e verifica; não baixa nem remove áudios. "
+                    "Baixar tudo baixa novamente todas as faixas da lista salva.")
         self.download_hint.set(hint)
 
     def mark_playlists(self, mark):
@@ -679,7 +699,7 @@ class App:
             "No modo por playlist: nome da pasta individual.\n"
             "No modo por grupo: mesmo nome reúne as playlists.\n"
             "Vazio restaura o nome original / Sem grupo.\n"
-            "Escolha o modo em Organizar saída.",
+            "Escolha o modo em Organizar exportação.",
             initialvalue=initial,
             parent=self.root,
         )
@@ -692,11 +712,11 @@ class App:
             return
         key = next(k for k, label in LAYOUTS.items() if label == self.layout.get())
         self.store.set_setting("output_layout", key)
-        self.refresh_output_preview()
+        self.refresh()
 
     def refresh_output_preview(self):
         playlists = self.store.playlists()
-        layout = self.store.setting("output_layout", "unified")
+        layout = self.store.setting("output_layout", "playlists")
         folders = output_folders(playlists, layout)
         category = "Categoria" if self.store.setting("by_genre", True) else "Artista"
         if layout == "unified":
@@ -708,6 +728,14 @@ class App:
                 text += f"\n… mais {len(examples) - 3} pastas (a prévia mostrará todos os arquivos)."
         self.output_preview.set(
             text + "\nPersonalize em Pasta / grupo na aba Playlists (aplica às marcadas)."
+        )
+        description = {
+            "unified": "Exportação: todas as playlists ficam juntas. Use Organizar exportação para separar.",
+            "playlists": "Exportação: uma pasta separada por playlist. Altere em Organizar exportação.",
+            "groups": "Exportação: mesmo grupo = mesma pasta; sem grupo = Sem grupo.",
+        }[layout]
+        self.folder_hint.set(
+            "Downloads juntos na biblioteca compartilhada. " + description
         )
 
     def refresh_tracks(self):
@@ -799,16 +827,30 @@ class App:
 
         ttk.Button(buttons, text=confirm, style="Accent.TButton", command=proceed).pack(side="right", padx=10)
 
-    def sync(self, force):
+    def refresh_selected(self):
         selected = sorted(self.checked_playlists)
         if not selected or self.busy:
             return
-        if not force and not all(
-            self.playlist_rows[str(i)]["downloaded_at"] or self.playlist_rows[str(i)]["local_count"]
-            for i in selected
-        ):
-            return
 
+        def refreshed(plan):
+            self.verified_playlists = getattr(self, "verified_playlists", set()) | set(selected)
+            self.refresh()
+            self.review(
+                "Playlists consultadas",
+                f"{len(plan.added)} inclusões · {len(plan.removed)} saídas · "
+                f"{len(plan.downloads)} faixas para baixar\nNenhum áudio foi baixado ou removido.",
+                [*plan.warnings, *[f"+ {p}: {name}" for p, name in plan.added],
+                 *[f"− {p}: {name}" for p, name in plan.removed]],
+                lambda: None, "Fechar",
+            )
+            self.status.set("Consulta concluída. Escolha uma ação de download se houver pendências.")
+
+        self.run(lambda: self.library.refresh_playlists(selected), refreshed)
+
+    def sync(self, force, remove_missing=False):
+        selected = sorted(self.checked_playlists)
+        if not selected or self.busy:
+            return
         def reviewed(plan):
             lines = ["Playlists incluídas nesta operação:"]
             lines += [
@@ -817,29 +859,38 @@ class App:
                 for _, snapshot in plan.snapshots
             ]
             lines += plan.warnings
-            lines += ["\nDiferenças desde o último download concluído (primeira vez: todas são inclusões):"]
+            lines += ["\nDiferenças em relação aos downloads mantidos (primeira vez: todas são inclusões):"]
             lines += [f"+ {p}: {name}" for p, name in plan.added]
-            lines += [f"− {p}: {name} (arquivo local preservado)" for p, name in plan.removed]
+            lines += [f"− {p}: {name} (saiu da playlist)" for p, name in plan.removed]
             lines += [f"Download: {t['artist']} — {t['name']}" for t in plan.downloads]
+            if remove_missing:
+                lines += ["\nMover para a lixeira: " + t["path"] for t in plan.cleanup]
+                lines += ["Arquivos compartilhados são preservados. Se houver falhas, nada será removido."]
+            else:
+                lines += ["As músicas que saíram serão mantidas na biblioteca."]
+            lines += ["\nDownloads na biblioteca compartilhada: " + str(self.library.music), self.folder_hint.get()]
             self.review(
-                "Conferir download" if force else "Conferir atualização",
+                "Conferir download e remoção" if remove_missing else "Conferir download",
                 f"{len(selected)} playlist(s) selecionada(s)\n"
                 f"{len(plan.downloads)} downloads · {plan.retained} reutilizadas · "
-                f"{len(plan.added)} inclusões · {len(plan.removed)} saídas de playlists",
+                f"{len(plan.added)} inclusões · {len(plan.removed)} saídas de playlists"
+                + (f" · {len(plan.cleanup)} arquivos para a lixeira" if remove_missing else ""),
                 lines,
                 lambda: self.run(lambda: self.library.apply(plan), self.sync_done),
-                "Baixar tudo" if force else self.update_button.cget("text"),
+                "Baixar tudo" if force else "Baixar e remover excluídas" if remove_missing else "Baixar novas",
             )
             self.status.set("Prévia pronta. Confira as diferenças e confirme os downloads.")
 
-        self.run(lambda: self.library.preview(force, playlist_ids=selected), reviewed)
+        self.run(lambda: self.library.preview(
+            force, playlist_ids=selected, saved=True, remove_missing=remove_missing), reviewed)
 
     def sync_done(self, result):
         self.show_saved_result(
             "Concluído com falhas" if result["failures"] else "Download finalizado",
             f"{result['downloaded']} downloads concluídos.\n"
             f"{result['reused']} arquivos reutilizados.\n{len(result['failures'])} falhas.\n\n"
-            "Faixas com falha aparecem na Biblioteca. Use Continuar download para repetir apenas pendências.\n"
+            f"{result.get('removed', 0)} arquivos movidos para a lixeira.\n"
+            "Faixas com falha aparecem na Biblioteca. Use Baixar novas para repetir apenas pendências.\n"
             + ("\nMétricas: " + result["run_directory"] if result.get("run_directory") else ""),
             self.library.music,
         )
