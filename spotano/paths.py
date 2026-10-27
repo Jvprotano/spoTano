@@ -32,7 +32,20 @@ def inside(root: Path, relative: str) -> Path:
         raise ValueError("Caminho fora da pasta gerenciada.")
     root = root.resolve()
     candidate = (root / relative).resolve()
-    if candidate == root or not candidate.is_relative_to(root):
+
+    def comparable(path):
+        # Windows realpath may retain the extended prefix if another thread creates
+        # a missing parent during resolution. Compare the same canonical spelling.
+        value = str(path)
+        if os.name == "nt":
+            if value.startswith("\\\\?\\UNC\\"):
+                value = "\\\\" + value[8:]
+            elif value.startswith("\\\\?\\"):
+                value = value[4:]
+        return Path(value)
+
+    checked, boundary = comparable(candidate), comparable(root)
+    if checked == boundary or not checked.is_relative_to(boundary):
         raise ValueError("Caminho fora da pasta gerenciada.")
     # resolve() also prevents junction/symlink escapes.
     return candidate

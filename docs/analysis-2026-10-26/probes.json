@@ -1,0 +1,27 @@
+{
+  "classification": {
+    "country,southern rock,blues": "Rock e Metal",
+    "indie pop,indie rock": "Rock e Metal",
+    "soul,blues": "Jazz e Blues",
+    "sertanejo,latin": "Sertanejo",
+    "pop rap": "Rap e Hip-Hop"
+  },
+  "category_change_on_force_download": {
+    "result": {
+      "downloaded": 1,
+      "reused": 0,
+      "failures": []
+    },
+    "previous_catalog_path": "Outros/Diagnostic - Diagnostic [AAAAAAAAAAAAAAAAAAAAAA].mp3",
+    "new_catalog_path": "Sertanejo/Diagnostic - Diagnostic [AAAAAAAAAAAAAAAAAAAAAA].mp3",
+    "music_files_remaining": [
+      "Outros\\Diagnostic - Diagnostic [AAAAAAAAAAAAAAAAAAAAAA].mp3",
+      "Sertanejo\\Diagnostic - Diagnostic [AAAAAAAAAAAAAAAAAAAAAA].mp3"
+    ]
+  },
+  "view_tiebreak": {
+    "candidate_count": 12,
+    "serial_metadata_calls": 12,
+    "note": "8 is a score distance, not a candidate count limit"
+  }
+}

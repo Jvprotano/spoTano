@@ -1,0 +1,51 @@
+{
+  "status": 200,
+  "seconds": 1.687,
+  "artists": [
+    {
+      "name": "Chris Stapleton",
+      "id": "71d58182-aa37-4c04-b21a-efe46ea0f221",
+      "score": 100,
+      "tags": [
+        {
+          "count": 1,
+          "name": "singer-songwriter"
+        },
+        {
+          "count": 1,
+          "name": "bluegrass"
+        },
+        {
+          "count": 1,
+          "name": "southern rock"
+        },
+        {
+          "count": 3,
+          "name": "country"
+        },
+        {
+          "count": 1,
+          "name": "outlaw country"
+        }
+      ]
+    },
+    {
+      "name": "Chris Stapleton",
+      "id": "d996d607-52e4-40c7-b369-211653df6d18",
+      "score": 84,
+      "tags": null
+    },
+    {
+      "name": "Chris Stapleton",
+      "id": "d5ff759e-89ad-4f1c-85b1-bfce485a0fe4",
+      "score": 83,
+      "tags": null
+    },
+    {
+      "name": "Chris Stapleton UK",
+      "id": "659c7390-214d-492b-8d5a-d0fa4418601b",
+      "score": 77,
+      "tags": null
+    }
+  ]
+}

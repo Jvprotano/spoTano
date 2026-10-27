@@ -1,0 +1,283 @@
+{
+  "versions": {
+    "spotdl": "4.6.0",
+    "yt-dlp": "2026.10.21",
+    "yt-dlp-ejs": "0.8.0",
+    "ytmusicapi": "1.12.1",
+    "spotipyFree": "1.9.14"
+  },
+  "mp3s": [
+    {
+      "path": "Outros\\Duda Bertelli - Ponto Fraco - Ao Vivo [5Q6vcrKZZxLQnNjfDTDWFY].mp3",
+      "duration_s": 129.62,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "2645754cd930956b95b39c2b7053251d6242cceb6f141ec9cb0afb2d80e920fd"
+    },
+    {
+      "path": "Outros\\Felipe e Rodrigo - Pos - Ao Vivo [1uDn0nbzeGPVw97jp7SvzR].mp3",
+      "duration_s": 173.636,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "464ae795a473500831616acdef7a753eb72f44e77186385b36ed05212d44b565"
+    },
+    {
+      "path": "Outros\\Gusttavo Lima - 10 Anos - Ao Vivo [7DQ64LPKZ9WIEeOHiJDCis].mp3",
+      "duration_s": 217.313,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "199dbd8791efc08f8e8e9a9cdea9fadc46809ad480995ff46df168be30fbb549"
+    },
+    {
+      "path": "Outros\\Hugo _ Guilherme - Mentirosa - Ao Vivo [7pBPXkaVQaP3Y3Wwfkpvbn].mp3",
+      "duration_s": 166.792,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "f3d9d56b0dde260f9af37b16d94949348dd7d73f206fcb2a1cbcf7f898b2658c"
+    },
+    {
+      "path": "Outros\\Jeninho - Peao Todo Tatuado [1wrA9K1P177mkPNt9BB2OZ].mp3",
+      "duration_s": 141.322,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "8926de22cb06cf49818e99cb4168c5782055241f24a4c72cb11a5d6432918528"
+    },
+    {
+      "path": "Outros\\Joao Bosco _ Vinicius - Sorte E Ter Voce (Carolinas) [1sqbH2ex01nweFoRnzOzGa].mp3",
+      "duration_s": 192.731,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "b5b869832a957e8f16bea72295df4c13b47eef84de3a54e22d4d3a94b67d6c71"
+    },
+    {
+      "path": "Outros\\Rincon - Nao e Pressa_ e Pressao [7DHAuCYRhuJVJPCwbFJA08].mp3",
+      "duration_s": 159.739,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "1fffc4c5a59af44061271608f80a421f11cd186e9861ab118485fd10a09aa751"
+    },
+    {
+      "path": "Rock e Metal\\Chris Stapleton - White Horse [7MSWxMumjz6lHj7oRApNbg].mp3",
+      "duration_s": 253.1,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "a9dc4eb79a7a22c87df0081b1c5b5f8ca19dee662834c0831105be05b282d728"
+    },
+    {
+      "path": "Rock e Metal\\Guns N_ Roses - Sweet Child O_ Mine [7snQQk1zcKl8gZ92AnueZW].mp3",
+      "duration_s": 356.153,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "20454e87d725939c0c4df743993623d9bc844f0b820b510e6d2be543a94c6453"
+    },
+    {
+      "path": "Rock e Metal\\The Drums - Money [3VIJBrMpvimHEw5wtPh2wB].mp3",
+      "duration_s": 242.991,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "6e376917a27a1323d5b3e33db864f9767acbd5721eb0b77adeccbbffbba7ce0b"
+    },
+    {
+      "path": "Sertanejo\\Gusttavo Lima - 10 Anos - Ao Vivo [7DQ64LPKZ9WIEeOHiJDCis].mp3",
+      "duration_s": 216.686,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "f118d9062dc6f83349dbd8362796d854a57d04d0d7b8c316cda476d0afa215df"
+    },
+    {
+      "path": "Sertanejo\\Gusttavo Lima - Rosas_ Versos e Vinhos - Ao Vivo [6PyTGvEiXsFQFSZIPY2AkX].mp3",
+      "duration_s": 224.784,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "bcfc390c5c935b7e2a59c7cf84a79284e0decc2bcaa9dcfd6a8e064adc4904c6"
+    },
+    {
+      "path": "Sertanejo\\Hugo _ Guilherme - Flash (Minha Mente) [4mTwKZPVhgWs6olQWxtUEG].mp3",
+      "duration_s": 158.041,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "f3ed536e74bd7ece033f4b91b234fc4a8caeba35650ef9bb60bab15f2cf5a0e5"
+    },
+    {
+      "path": "Sertanejo\\Hugo _ Guilherme - Flash - Ao Vivo [3rRihXlOCLUlkQTzglpwCi].mp3",
+      "duration_s": 134.296,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "23b842d2ffaf08b6eecbba91e1cb5a7691ea8694af2754a6203fab3f15ce2527"
+    },
+    {
+      "path": "Sertanejo\\Hugo _ Guilherme - Mentirosa - Ao Vivo [7pBPXkaVQaP3Y3Wwfkpvbn].mp3",
+      "duration_s": 166.792,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "f3d9d56b0dde260f9af37b16d94949348dd7d73f206fcb2a1cbcf7f898b2658c"
+    },
+    {
+      "path": "Sertanejo\\Joao Bosco _ Vinicius - Eu Vou Morrer De Amor [0DZD6Ovjvifz8AQPnGbhyE].mp3",
+      "duration_s": 156.63,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "ea2d23a220f79c4085b1a46f03d4f36832b07ac632abb6644d319918af02f8b9"
+    },
+    {
+      "path": "Sertanejo\\Joao Bosco _ Vinicius - Sorte E Ter Voce (Carolinas) [1sqbH2ex01nweFoRnzOzGa].mp3",
+      "duration_s": 192.731,
+      "bitrate": 192000,
+      "sample_rate": 44100,
+      "channels": 2,
+      "id3_version": [
+        2,
+        3,
+        0
+      ],
+      "bitrate_mode": "BitrateMode.CBR",
+      "genre_tag": "",
+      "embedded_covers": 0,
+      "mpeg_payload_sha256": "b5b869832a957e8f16bea72295df4c13b47eef84de3a54e22d4d3a94b67d6c71"
+    }
+  ]
+}
