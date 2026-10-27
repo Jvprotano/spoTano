@@ -40,6 +40,8 @@ class App:
         self.controls = []
         self.checked_playlists = set()
         self.library = Library(self.store, SpotProvider(self.cancel, self.report), self.report, self.cancel)
+        pending = self.store.rows("SELECT DISTINCT playlist_id,track_id FROM download_pending")
+        self.checked_playlists = {row["playlist_id"] for row in pending}
         self.exporter = Exporter(self.library)
         root.title("spoTano · Sua música, com você")
         root.geometry("1200x900")
@@ -123,6 +125,11 @@ class App:
         self.progress = ttk.Progressbar(root, mode="indeterminate", style="Download.Horizontal.TProgressbar")
         self.progress.grid(row=4, column=0, sticky="ew")
         self.refresh()
+        if pending:
+            self.status.set(
+                f"{len({row['track_id'] for row in pending})} faixas pendentes. "
+                "Playlists marcadas para continuar em Baixar / retomar."
+            )
         root.after(100, self.pump)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -207,15 +214,16 @@ class App:
         )
         actions = ttk.Frame(parent)
         actions.grid(row=6, column=0, sticky="ew", pady=(6, 0))
-        self.force_button = self.button(actions, "Baixar tudo", lambda: self.sync(True), True)
-        self.force_button.pack(side="left")
+        self.new_button = self.button(actions, "Baixar / retomar", lambda: self.sync(False), True)
+        self.new_button.pack(side="left")
         self.update_button = self.button(actions, "Atualizar selecionadas", self.refresh_selected)
         self.update_button.pack(side="left", padx=8)
         self.remove_button = self.button(actions, "Remover selecionadas", self.remove_playlist)
         self.remove_button.pack(side="right")
         self.incremental_actions = ttk.Frame(actions)
-        self.new_button = self.button(self.incremental_actions, "Baixar novas", lambda: self.sync(False))
-        self.new_button.pack(side="left")
+        self.incremental_actions.pack(side="left")
+        self.force_button = self.button(self.incremental_actions, "Baixar tudo", lambda: self.sync(True))
+        self.force_button.pack(side="left")
         self.mirror_button = self.button(
             self.incremental_actions,
             "Baixar e remover excluídas",
@@ -239,7 +247,8 @@ class App:
         self.label(
             parent,
             "Sua coleção local",
-            "Uma cópia por faixa do Spotify. Corrija categorias e acompanhe músicas que precisam de atenção.",
+            "As músicas aparecem ao importar a playlist, antes do download. "
+            "Defina categorias aqui e confira os arquivos ou falhas.",
         )
         bar = ttk.Frame(parent)
         bar.pack(fill="x")
@@ -263,14 +272,18 @@ class App:
         self.category.set("Automática")
         self.category.pack(side="left")
         self.controls.append(self.category)
-        self.button(actions, "Corrigir categoria", self.correct).pack(side="left", padx=8)
-        self.button(actions, "Associar MP3 local", self.import_local).pack(side="left")
-        self.button(actions, "Revisar faixas sem playlist", self.cleanup).pack(side="right")
+        self.button(actions, "Aplicar à faixa", self.correct).pack(side="left", padx=8)
+        self.button(actions, "Aplicar ao artista", self.correct_artist).pack(side="left")
         extra = ttk.Frame(parent)
         extra.pack(fill="x")
-        self.button(extra, "Corrigir artista", self.correct_artist).pack(side="left")
+        self.button(extra, "Associar MP3 local", self.import_local).pack(side="left")
         self.button(extra, "Fonte do áudio…", self.audio_source).pack(side="left", padx=8)
         self.button(extra, "Revisar cópias antigas…", self.review_copies).pack(side="right")
+        self.button(extra, "Revisar faixas sem playlist", self.cleanup).pack(side="right", padx=8)
+        self.library_hint = tk.StringVar()
+        ttk.Label(parent, textvariable=self.library_hint, wraplength=920, foreground="#63786c").pack(
+            anchor="w", pady=(4, 0)
+        )
         self.tracks.master.pack_forget()
         self.tracks.master.pack(fill="both", expand=True, pady=12)
 
@@ -613,7 +626,9 @@ class App:
                     self.root.destroy()
                     return
                 if kind == "error":
-                    self.status.set(str(value))
+                    self.status.set(
+                        str(value) + " Use Baixar / retomar para continuar os downloads pendentes."
+                    )
                     self.append_log(f"{'Cancelado' if isinstance(value, Cancelled) else 'Erro'}: {value}")
                     if not isinstance(value, Cancelled):
                         messagebox.showerror("Operação interrompida", str(value), parent=self.root)
@@ -656,7 +671,9 @@ class App:
                 or bool(
                     self.store.rows(
                         """SELECT 1 FROM membership m JOIN tracks t ON t.id=m.track_id
-                WHERE m.playlist_id=? AND t.status='pending' LIMIT 1""",
+                WHERE m.playlist_id=? AND (t.status='pending' OR EXISTS(
+                    SELECT 1 FROM download_pending d WHERE d.playlist_id=m.playlist_id
+                    AND d.track_id=m.track_id)) LIMIT 1""",
                         (row["id"],),
                     )
                 )
@@ -694,32 +711,25 @@ class App:
     def update_playlist_actions(self):
         count = len(self.checked_playlists)
         self.selection_summary.set(f"{count} playlist(s) marcada(s)" if count else "Nenhuma playlist marcada")
-        for button in (self.force_button, self.update_button, self.remove_button, self.group_button):
+        for button in (
+            self.new_button,
+            self.force_button,
+            self.update_button,
+            self.remove_button,
+            self.group_button,
+        ):
             button.configure(state="normal" if count and not self.busy else "disabled")
         selected = [self.playlist_rows[str(i)] for i in self.checked_playlists]
-        changed = any(
-            row["changes"]
-            and (
-                row["downloaded_at"]
-                or row["local_count"]
-                or row["id"] in getattr(self, "verified_playlists", set())
-            )
-            for row in selected
-        )
-        for button in (self.new_button, self.mirror_button):
-            button.configure(state="normal" if changed and not self.busy else "disabled")
+        changed = any(row["changes"] for row in selected)
+        self.mirror_button.configure(state="normal" if changed and not self.busy else "disabled")
         if changed:
-            self.incremental_actions.pack(side="left")
-            hint = (
-                "Baixar novas mantém as excluídas. Baixar e remover excluídas move as saídas para a lixeira."
-            )
+            self.mirror_button.pack(side="left", padx=8)
         else:
-            self.incremental_actions.pack_forget()
-            hint = (
-                "Atualizar apenas consulta e verifica; não baixa nem remove áudios. "
-                "Baixar tudo baixa novamente todas as faixas da lista salva."
-            )
-        self.download_hint.set(hint)
+            self.mirror_button.pack_forget()
+        self.download_hint.set(
+            "Baixar / retomar usa a lista salva e continua as pendências, preservando downloads concluídos. "
+            "Baixar tudo reinicia todos os áudios. Atualizar consulta mudanças no Spotify."
+        )
 
     def mark_playlists(self, mark):
         if self.busy:
@@ -821,6 +831,18 @@ class App:
         self.tracks.delete(*self.tracks.get_children())
         search = self.search.get().casefold()
         self.track_rows = {}
+        options = download_options(self.store)
+        self.library_hint.set(
+            "Faixa: altera só a selecionada. Artista: aplica às músicas do mesmo artista principal, "
+            "inclusive futuras; correções individuais têm prioridade. "
+            + (
+                "Arquivos já baixados mudam de pasta agora, sem novo download. "
+                if options["categories"]
+                else "Pastas por categoria estão desativadas: a correção fica salva. Ative Categoria em "
+                "Personalizar download e aplique as opções aos arquivos nas Configurações para separá-los. "
+            )
+            + "Para atualizar cópias no pendrive, exporte novamente."
+        )
         for row in self.store.tracks():
             metadata = json.loads(row["metadata"])
             title = metadata["name"] + " / " + metadata["artist"]
@@ -832,6 +854,8 @@ class App:
                 "pending": "Aguardando download",
                 "error": "Falha · ver detalhes",
             }[row["status"]]
+            if row["resume_pending"] and row["status"] != "error":
+                status = "Download pendente"
             self.tracks.insert(
                 "",
                 "end",
@@ -853,6 +877,7 @@ class App:
                 if row["path"]
                 else row["error"] or "Ainda não baixada."
             )
+            self.category.set(row["override"] or "Automática")
 
     def add_playlist(self):
         url = self.url.get()
@@ -861,7 +886,7 @@ class App:
             self.url.set("")
             self.checked_playlists.add(playlist_id)
             self.refresh()
-            self.status.set("Playlist importada e marcada. Clique em Baixar tudo para baixar os áudios.")
+            self.status.set("Playlist importada e marcada. Clique em Baixar / retomar para baixar os áudios.")
 
         self.run(lambda: self.library.import_playlist(url), imported)
 
@@ -971,7 +996,7 @@ class App:
                 if force
                 else "Baixar e remover excluídas"
                 if remove_missing
-                else "Baixar novas",
+                else "Baixar / retomar",
             )
             self.status.set("Prévia pronta. Confira as diferenças e confirme os downloads.")
 
@@ -988,7 +1013,7 @@ class App:
             f"{result['downloaded']} downloads concluídos.\n"
             f"{result['reused']} arquivos reutilizados.\n{len(result['failures'])} falhas.\n\n"
             f"{result.get('removed', 0)} arquivos movidos para a lixeira.\n"
-            "Faixas com falha aparecem na Biblioteca. Use Baixar novas para repetir apenas pendências.\n"
+            "Faixas com falha aparecem na Biblioteca. Use Baixar / retomar para continuar as pendências.\n"
             + ("\nMétricas: " + result["run_directory"] if result.get("run_directory") else ""),
             self.library.music,
         )
@@ -1028,8 +1053,10 @@ class App:
             metadata = json.loads(self.track_rows[selection[0]]["metadata"])
             if messagebox.askyesno(
                 "Categoria do artista",
-                f"Aplicar {category} a {metadata['artist']}?\n"
-                "Correções individuais de faixa continuam tendo prioridade.",
+                f"Aplicar {category} às músicas de {metadata['artist']}?\n"
+                "Vale para as faixas já importadas e futuras do mesmo artista principal. "
+                "Os arquivos locais serão atualizados conforme as opções de download, sem baixar áudio.\n"
+                "Correções individuais de faixa continuam tendo prioridade. Exporte novamente para atualizar o pendrive.",
             ):
                 self.run(
                     lambda: self.library.correct_artist(

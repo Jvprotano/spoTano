@@ -111,9 +111,13 @@ def test_failed_force_preserves_previous_audio_and_continues(collection):
     assert [event["completed"] for event in batches] == [0, 1, 2]
     assert batches[-1] == {"kind": "batch_progress", "completed": 2, "total": 2, "failed": 1, "reused": 0}
     events.clear()
+    provider.fail.clear()
     lib.apply(lib.preview())
     batches = [event for event in events if isinstance(event, dict)]
-    assert batches == [{"kind": "batch_progress", "completed": 0, "total": 0, "failed": 0, "reused": 2}]
+    assert batches == [
+        {"kind": "batch_progress", "completed": 0, "total": 1, "failed": 0, "reused": 1},
+        {"kind": "batch_progress", "completed": 1, "total": 1, "failed": 0, "reused": 1},
+    ]
 
 
 def test_failed_first_download_is_retried(collection):

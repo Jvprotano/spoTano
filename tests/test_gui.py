@@ -49,6 +49,8 @@ def test_checkbox_selection_controls_actions_and_survives_refresh(app):
     assert app.checked_playlists == {1}
     assert str(app.update_button["state"]) == "normal"
     assert str(app.force_button["state"]) == "normal"
+    assert str(app.new_button["state"]) == "normal"
+    assert app.new_button.cget("text") == "Baixar / retomar"
     assert app.force_button.cget("text") == "Baixar tudo"
     app.refresh()
     assert app.checked_playlists == {1}
@@ -60,6 +62,41 @@ def test_checkbox_selection_controls_actions_and_survives_refresh(app):
     app.busy = False
     app.mark_playlists(False)
     assert str(app.force_button["state"]) == "disabled"
+    assert str(app.new_button["state"]) == "disabled"
+
+
+def test_library_explains_correction_scope_and_shows_tracks_before_download(app):
+    assert len(app.tracks.get_children()) == 2
+    assert "Pastas por categoria estão desativadas" in app.library_hint.get()
+    assert all(row["path"] is None for row in app.store.tracks())
+    app.store.set_setting("download_options", {"categories": True})
+    app.refresh_tracks()
+    assert "mudam de pasta agora" in app.library_hint.get()
+    calls = []
+    app.library.correct_genre = lambda *args: calls.append(args)
+    app.run = lambda work: work()
+    app.tracks.selection_set("A" * 22)
+    app.track_detail()
+    app.category.set("Pop")
+    next(
+        w for w in app.controls if isinstance(w, ttk.Button) and w.cget("text") == "Aplicar à faixa"
+    ).invoke()
+    assert calls == [("A" * 22, "Pop")]
+
+
+def test_reopening_marks_playlists_with_saved_downloads_for_resume(app):
+    with app.store.connect() as db:
+        db.execute("INSERT INTO download_pending VALUES(2,?)", ("B" * 22,))
+    window = tk.Toplevel(app.root)
+    window.withdraw()
+    restarted = App(window, app.store.root)
+    try:
+        assert restarted.checked_playlists == {2}
+        assert "1 faixas pendentes" in restarted.status.get()
+        assert str(restarted.new_button["state"]) == "normal"
+        assert restarted.tracks.set("B" * 22, "Estado") == "Download pendente"
+    finally:
+        window.destroy()
 
 
 def test_performance_suggestion_only_changes_both_fields_when_applied(app, monkeypatch):
@@ -201,7 +238,8 @@ def test_refresh_only_then_explicit_partial_download_can_resume(app):
     app.library.provider.fail.clear()
     app.library.apply(app.library.preview(playlist_ids=[2], saved=True))
     app.refresh()
-    assert app.incremental_actions.winfo_manager() == ""
+    assert app.mirror_button.winfo_manager() == ""
+    assert str(app.new_button["state"]) == "normal"
 
 
 def test_refresh_is_available_for_mixed_and_new_playlists(app):

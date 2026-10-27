@@ -90,12 +90,18 @@ def test_retag_modified_file_preserves_bytes(tmp_path):
 
 
 def test_unknown_genre_is_not_reclassified_on_every_sync(tmp_path, monkeypatch):
+    from spotano.genres import GenreResolver
+
     store, _, lib = collection(tmp_path)
     store.set_setting("download_options", {"categories": True})
     calls = []
-    monkeypatch.setattr(
-        "spotano.library.GenreResolver.resolve", lambda self, data: calls.append(data) or "Outros"
-    )
+
+    def unresolved(self, metadata):
+        calls.append(metadata)
+        self.track_evidence(metadata, "Outros", "artista")
+        return "Outros"
+
+    monkeypatch.setattr(GenreResolver, "resolve", unresolved)
     lib.apply(lib.preview())
     lib.apply(lib.preview())
     lib.reorganize()

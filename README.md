@@ -8,6 +8,11 @@ pendrive ou outra pasta. Interface em português, sem conta spoTano ou IA paga.
 
 Pacote local desta implementação: `dist/spoTano-1.3.0-windows-x64.zip`.
 
+**Baixar / retomar** continua lotes interrompidos sem repetir os MP3s concluídos,
+inclusive substituições iniciadas em Baixar tudo. A Biblioteca permite classificar
+antes do download e reorganizar arquivos existentes. Comportamento e cenários de
+240 faixas: [Biblioteca e retomada](docs/EXECUTION-RECOVERY.md).
+
 O extrator de mídia e as conexões de consulta são reutilizados. A classificação
 confere a gravação nos catálogos iTunes e Deezer antes de consultar gêneros de
 artistas no MusicBrainz/Wikidata. Rótulos amplos como Pop têm prioridade menor que
@@ -28,7 +33,7 @@ consultar vídeos individuais apenas para contar visualizações. A pesquisa amp
 os resultados quando necessário e tenta até três gravações compatíveis em caso
 de falha de extração. Correspondências validadas ficam em cache por Spotify ID e
 metadados; URLs temporárias de mídia são renovadas na extração. Arquivos locais
-íntegros continuam sendo reutilizados em **Baixar novas**.
+íntegros continuam sendo reutilizados em **Baixar / retomar**.
 
 A classificação ocorre em paralelo à busca do áudio, com consultas deduplicadas
 por artista. Os votos das tags contam na escolha da categoria. O cache de gêneros
@@ -41,7 +46,7 @@ A chave configurada fica no catálogo local e em seu backup, e é omitida dos lo
 Em **Biblioteca → Fonte do áudio**, consulte as opções, confira duração e edição,
 abra o vídeo e escolha a gravação completa. Também é possível colar a URL do
 YouTube. **Baixar esta gravação** substitui somente essa faixa após validação.
-**Automática** remove a escolha para downloads futuros. **Corrigir artista**
+**Automática** remove a escolha para downloads futuros. **Aplicar ao artista**
 define uma categoria para o artista; a correção individual da faixa tem prioridade.
 
 Downloads e conversões têm limites separados. Para comparar com o teste anterior,
@@ -104,7 +109,7 @@ e [otimização anterior](docs/EXECUTION-OPTIMIZATION.md).
    Requer internet e espaço em disco; não exige ambiente de desenvolvimento.
 5. Cole uma URL pública na aba **Playlists** e clique **Importar playlist**.
    Nome e faixas são consultados imediatamente, sem baixar áudio. Marque uma ou
-   mais playlists, clique **Baixar tudo**, confira a prévia e confirme.
+   mais playlists, clique **Baixar / retomar**, confira a prévia e confirme.
 
 O binário ainda não tem assinatura de código. Use a distribuição deste
 repositório e confira `SHA256SUMS.txt` com `Get-FileHash` se desejar.
@@ -123,11 +128,11 @@ download concluído; selecionar uma linha mostra a última consulta e observaç�
 Use as caixas da coluna **Marcar** (ou Espaço), **Marcar todas** e **Desmarcar**.
 **Atualizar selecionadas** consulta somente as marcadas, salva a lista atual e
 verifica diferenças e integridade local. **Não baixa nem remove áudios.** Está
-disponível mesmo antes do primeiro download. Depois da consulta, quando houver
-mudanças ou pendências, aparecem mais duas ações além de **Baixar tudo**:
+disponível mesmo antes do primeiro download. Para baixar os áudios:
 
-- **Baixar novas**: baixa faixas novas, ausentes ou inválidas e mantém na biblioteca
-  os arquivos das faixas que saíram da playlist.
+- **Baixar / retomar**: sempre disponível ao marcar playlists. Baixa faixas novas,
+  ausentes e pendências de uma execução interrompida, reaproveitando as concluídas.
+  Mantém na biblioteca os arquivos das faixas que saíram da playlist.
 - **Baixar e remover excluídas**: baixa as pendências e move para a lixeira local
   os arquivos das faixas que saíram. Preserva músicas usadas ou mantidas por outras
   playlists. Se algum download falhar, nenhuma remoção é executada.
@@ -151,12 +156,18 @@ compartilhadas entre elas. A prévia informa a data da última leitura. Para bus
 mudanças na playlist, use **Atualizar selecionadas**. Os
 arquivos anteriores são mantidos até o novo MP3 ser validado. Um download que
 falha não impede os seguintes; o erro aparece na Biblioteca. Se o arquivo antigo
-continua íntegro, ele permanece utilizável; **Baixar novas**
-o reutiliza. Use **Baixar tudo** ou **Associar MP3 local** para tentar substituir esse arquivo depois.
+continua íntegro, ele permanece utilizável. **Baixar / retomar** repete a
+substituição pendente, sem repetir as substituições que já terminaram.
 
-O estado persiste entre execuções. Fechar durante uma operação solicita
-cancelamento. Ao abrir novamente, **Atualizar selecionadas** verifica o que falta e
-**Baixar novas** retoma as pendências. A leitura
+O estado persiste entre execuções. A fila inteira é salva antes de começar;
+cada MP3 validado é registrado separadamente. Fechar durante uma operação solicita
+cancelamento. Após cancelamento, queda de conexão ou encerramento abrupto, abra
+novamente e use **Baixar / retomar**: as playlists com pendências já ficam marcadas.
+Não é preciso consultar o Spotify novamente para continuar a lista salva. Isso
+também vale para **Baixar tudo**: arquivos antigos válidos não escondem as
+substituições que ainda faltam. A faixa interrompida começa novamente; os MP3s já
+concluídos são reutilizados. Arquivos modificados fora do aplicativo são preservados
+para revisão, em vez de sobrescritos. A leitura
 incompleta de qualquer playlist aborta toda a prévia e preserva o snapshot anterior.
 Playlists vazias completas são válidas; itens indisponíveis tornam remoções
 ambíguas e bloqueiam aquela atualização por segurança.
@@ -243,9 +254,23 @@ de 90 dias; ausência de resultado, de 1 dia. Falhas de rede são exibidas nos l
 e não são persistidas como ausência de gênero. Isso não garante a classificação
 de cada música. Sem evidência suficiente, o destino é **Outros**.
 
-Na Biblioteca, selecione uma faixa, escolha a categoria e clique **Corrigir
-categoria**. A correção persiste e tem prioridade. **Automática** remove a
-correção. **Reclassificar gêneros** nas Configurações atualiza as classificações
+As músicas aparecem na **Biblioteca** assim que a playlist é importada, antes
+de baixar áudio. Você pode preparar as categorias primeiro ou corrigir depois:
+
+- **Aplicar à faixa** altera apenas a música selecionada, com prioridade sobre
+  a regra do artista e a classificação automática.
+- **Aplicar ao artista** altera todas as músicas importadas do mesmo artista
+  principal, respeitando as correções individuais, e vale para músicas futuras.
+
+Com **Categoria** ativada, os arquivos já baixados mudam de pasta imediatamente,
+sem novo download. As tags de gênero também são atualizadas quando **Metadados**
+está ativo. Com Categoria desativada, a correção fica salva, sem criar pastas;
+ative Categoria em **Personalizar download** e use **Aplicar opções às músicas
+já baixadas** nas Configurações para reorganizar. Cópias já exportadas para o
+pendrive são atualizadas na próxima exportação.
+
+**Automática** remove a correção do escopo escolhido (faixa ou artista).
+**Reclassificar gêneros** nas Configurações atualiza as classificações
 automáticas. Selecione **Artistas** sem **Categoria** para usar pastas por artista,
 ou desmarque ambas para manter as músicas juntas.
 Trocar organização reaproveita os áudios; não cria downloads.

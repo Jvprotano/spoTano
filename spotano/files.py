@@ -14,7 +14,16 @@ class AudioFiles:
         self.music = store.root / "Music"
 
     def install(
-        self, staged, current, relative, category, match=None, fingerprint=None, tagged=None, classified=None
+        self,
+        staged,
+        current,
+        relative,
+        category,
+        match=None,
+        fingerprint=None,
+        tagged=None,
+        classified=None,
+        complete_download=False,
     ):
         new_hash = digest(staged)
         target = inside(self.music, relative)
@@ -35,6 +44,7 @@ class AudioFiles:
             "sha256": new_hash,
             "category": category,
             "trash": "trash/" + transition_id + "/",
+            "complete_download": complete_download,
         }
         if tagged is not None:
             payload["tagged"] = int(tagged)
@@ -82,6 +92,10 @@ class AudioFiles:
                 if flag in payload:
                     db.execute(f"UPDATE tracks SET {flag}=? WHERE id=?", (payload[flag], payload["track_id"]))
             self.store.bump(db)
+            # A validated installation completes this track for every playlist sharing it.
+            # Commit with the file registration so crash recovery cannot lose a replacement request.
+            if payload.get("complete_download"):
+                db.execute("DELETE FROM download_pending WHERE track_id=?", (payload["track_id"],))
             if payload.get("match"):
                 import time
 

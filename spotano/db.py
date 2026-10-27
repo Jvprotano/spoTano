@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS download_membership(
  playlist_id INTEGER REFERENCES playlists(id) ON DELETE CASCADE,
  track_id TEXT NOT NULL, metadata TEXT NOT NULL,
  PRIMARY KEY(playlist_id, track_id));
+CREATE TABLE IF NOT EXISTS download_pending(
+ playlist_id INTEGER REFERENCES playlists(id) ON DELETE CASCADE,
+ track_id TEXT REFERENCES tracks(id),
+ PRIMARY KEY(playlist_id, track_id));
 CREATE TABLE IF NOT EXISTS genre_cache(
  artist TEXT PRIMARY KEY, genres TEXT NOT NULL, fetched_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS audio_matches(
@@ -137,7 +141,8 @@ class Store:
 
     def tracks(self, active=False):
         return self.rows(
-            """SELECT t.*, COUNT(m.playlist_id) references_count FROM tracks t
+            """SELECT t.*, EXISTS(SELECT 1 FROM download_pending d WHERE d.track_id=t.id) resume_pending,
+            COUNT(m.playlist_id) references_count FROM tracks t
             LEFT JOIN membership m ON m.track_id=t.id GROUP BY t.id """
             + (" HAVING COUNT(m.playlist_id)>0 " if active else " ")
             + "ORDER BY t.id"

@@ -218,6 +218,27 @@ def test_old_wrong_category_refreshes_without_downloading_again(tmp_path, monkey
     assert len(list(lib.music.rglob("*.mp3"))) == 1
 
 
+@pytest.mark.parametrize("previous_category", ["Outros", "Eletronica"])
+def test_missing_genre_evidence_retries_without_redownload(tmp_path, monkeypatch, previous_category):
+    store, provider, lib = library(tmp_path, {**track(), "genres": [], "track_genres": []})
+    with store.connect() as db:
+        db.execute("UPDATE tracks SET category=?,classified=1", (previous_category,))
+        db.execute("DELETE FROM genre_evidence")
+    store.set_setting("musicbrainz", True)
+    calls = []
+
+    def catalogue(self, metadata):
+        calls.append(metadata["song_id"])
+        return {"category": "Rap e Hip-Hop", "tags": ["Hip-Hop/Rap"]}
+
+    monkeypatch.setattr(GenreResolver, "itunes", catalogue)
+    result = lib.apply(lib.preview())
+    assert result["downloaded"] == 0 and provider.downloads == [A]
+    assert store.tracks()[0]["category"] == "Rap e Hip-Hop"
+    lib.apply(lib.preview())
+    assert calls == [A]  # Fresh evidence prevents another catalogue query.
+
+
 def test_old_positive_artist_cache_is_invalidated(tmp_path, monkeypatch):
     monkeypatch.setattr(GenreResolver, "itunes", lambda *args: None)
     monkeypatch.setattr(GenreResolver, "deezer", lambda *args: None)
