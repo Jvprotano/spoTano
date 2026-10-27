@@ -1,0 +1,11 @@
+{
+  "source": "180 seconds of synthetic sine, stereo Opus",
+  "single_conversion_s": 4.281,
+  "three_parallel_each_s": [
+    10.094,
+    10.047,
+    10.078
+  ],
+  "three_parallel_wall_s": 10.094,
+  "limits": "Synthetic signal and current host load; not a real-song or historical-runtime benchmark"
+}

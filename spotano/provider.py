@@ -8,11 +8,18 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 
 class Cancelled(Exception):
     pass
+
+
+class ProviderError(RuntimeError):
+    def __init__(self, message, diagnostic=None):
+        super().__init__(message)
+        self.diagnostic = diagnostic or {}
 
 
 def stop_tree(process):
@@ -32,8 +39,11 @@ def stop_tree(process):
 
 
 class SpotProvider:
-    def __init__(self, cancel=None):
+    def __init__(self, cancel=None, progress=lambda message: None):
         self.cancel = cancel or threading.Event()
+        self.progress = progress
+        self._batch = None
+        self.download_settings = {}
 
     def call(self, action, payload=None, timeout=300):
         with tempfile.TemporaryDirectory(prefix="spotano-worker-") as temp:
@@ -41,43 +51,102 @@ class SpotProvider:
             request.write_text(json.dumps({"action": action, "payload": payload or {}}), encoding="utf-8")
             command = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "spotano"]
             command += ["--worker", str(request), str(result)]
+            activity = Path(temp) / "progress.jsonl"
+            activity.touch()
             kwargs = (
                 {"creationflags": subprocess.CREATE_NO_WINDOW}
                 if os.name == "nt"
                 else {"start_new_session": True}
             )
-            with (Path(temp) / "worker.log").open("w", encoding="utf-8") as log:
+            labels = {
+                "playlist": "Consulta ao Spotify",
+                "download": "Download de áudio",
+                "setup": "Preparação de componentes",
+                "local": "Conversão de áudio local",
+                "diagnostics": "Diagnóstico",
+            }
+            label = labels.get(action, action)
+            self.progress(f"{label}: iniciando mecanismo (limite de {timeout}s).")
+            with (
+                (Path(temp) / "worker.log").open("w", encoding="utf-8") as log,
+                activity.open(encoding="utf-8") as updates,
+            ):
                 process = subprocess.Popen(command, stdout=log, stderr=log, **kwargs)
-                started = time.monotonic()
+                started = last_event = last_notice = time.monotonic()
+
+                def drain():
+                    nonlocal last_event
+                    while True:
+                        position = updates.tell()
+                        line = updates.readline()
+                        if not line.endswith("\n"):
+                            updates.seek(position)
+                            break
+                        try:
+                            self.progress(json.loads(line)["message"])
+                            last_event = time.monotonic()
+                        except (ValueError, KeyError):
+                            pass
+
                 try:
                     while process.poll() is None:
+                        drain()
                         if self.cancel.wait(0.15):
                             raise Cancelled("Operação cancelada; arquivos anteriores preservados.")
-                        if time.monotonic() - started > timeout:
+                        current = time.monotonic()
+                        if current - last_notice >= 10 and current - last_event >= 10:
+                            self.progress(
+                                f"{label}: {int(current - started)}s decorridos; "
+                                f"sem novas etapas há {int(current - last_event)}s. "
+                                f"Aguardando provedor; limite de {timeout}s. Você pode cancelar."
+                            )
+                            last_notice = current
+                        if current - started > timeout:
                             raise TimeoutError(
                                 "O provedor excedeu o tempo limite. Tente atualizar novamente."
                             )
                 finally:
                     if process.poll() is None:
                         stop_tree(process)
+                drain()
             if not result.exists():
                 raise RuntimeError("O mecanismo de download encerrou sem resposta. Verifique a instalação.")
             data = json.loads(result.read_text(encoding="utf-8"))
             if "error" in data:
-                raise RuntimeError(data["error"])
+                raise ProviderError(data["error"], data.get("diagnostic"))
             return data["result"]
 
     def playlist(self, url):
         return self.call("playlist", {"url": url})
 
     def download(self, metadata, output):
+        if self._batch is not None:
+            return self._batch.download(metadata, output)
         return self.call("download", {"metadata": metadata, "output": str(output)}, timeout=480)
+
+    @contextmanager
+    def download_batch(self):
+        from .downloads import DownloadBatch
+
+        if self._batch is not None:
+            raise RuntimeError("Já há um lote de downloads em execução.")
+        batch = self._batch = DownloadBatch(self)
+        try:
+            yield batch
+        finally:
+            try:
+                batch.close()
+            finally:
+                self._batch = None
 
     def setup(self):
         return self.call("setup", timeout=600)
 
+    def candidates(self, metadata):
+        return self.call("candidates", {"metadata": metadata}, timeout=120)
 
-def strict_playlist(client, url):
+
+def strict_playlist(client, url, progress=lambda message: None):
     """Reject incomplete pages and changing snapshots, including empty snapshots."""
     from .paths import playlist_url
 
@@ -97,6 +166,7 @@ def strict_playlist(client, url):
         if response.get("total", total) != total:
             raise ValueError("A playlist mudou durante a consulta. Atualize novamente.")
         items.extend(response["items"])
+        progress(f"Spotify · {before['name']}: {len(items)}/{total} itens recebidos.")
         link = response.get("next")
         if not link:
             break
@@ -128,6 +198,9 @@ def strict_playlist(client, url):
                 "name": raw["name"],
                 "artist": artists[0],
                 "artists": artists,
+                "artist_details": [{"name": a["name"], "id": a.get("id")}
+                                   for a in raw.get("artists", []) if a.get("name")],
+                "artist_id": next((a.get("id") for a in raw.get("artists", []) if a.get("name")), None),
                 "genres": raw.get("genres", []) + album.get("genres", []),
                 "album_name": album.get("name", ""),
                 "album_artist": artists[0],
@@ -150,7 +223,19 @@ def strict_playlist(client, url):
 
 
 def worker(request: Path, result: Path):
+    from .processes import background_subprocesses
+
+    with background_subprocesses():
+        _worker(request, result)
+
+
+def _worker(request: Path, result: Path):
     from .paths import atomic_json
+
+    def progress(message):
+        # Structured stages only: no raw SDK output, URLs, cookies or credentials.
+        with (request.parent / "progress.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"message": message}, ensure_ascii=False) + "\n")
 
     try:
         data = json.loads(request.read_text(encoding="utf-8"))
@@ -169,7 +254,9 @@ def worker(request: Path, result: Path):
             from spotdl.utils.deno import download_deno, get_deno_path
             from spotdl.utils.ffmpeg import download_ffmpeg, get_ffmpeg_path
 
+            progress("Verificando / preparando FFmpeg…")
             ffmpeg = get_ffmpeg_path() or download_ffmpeg()
+            progress("Verificando / preparando Deno…")
             deno = get_deno_path() or download_deno()
             answer = {"ffmpeg": str(ffmpeg), "deno": str(deno)}
         elif action == "playlist":
@@ -182,7 +269,8 @@ def worker(request: Path, result: Path):
                 use_official_api=official,
                 no_cache=True,
             )
-            answer = strict_playlist(SpotifyClient(), payload["url"])
+            progress("Conectando ao Spotify e lendo metadados da playlist…")
+            answer = strict_playlist(SpotifyClient(), payload["url"], progress)
         elif action == "local":
             from spotdl.utils.ffmpeg import get_ffmpeg_path
 
@@ -190,6 +278,7 @@ def worker(request: Path, result: Path):
             if not ffmpeg:
                 raise ValueError("Prepare os componentes de download nas Configurações.")
             options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+            progress("FFmpeg · convertendo áudio local para MP3 192 kbps / 44,1 kHz / estéreo…")
             subprocess.run(
                 [
                     str(ffmpeg),
@@ -219,56 +308,35 @@ def worker(request: Path, result: Path):
                 **options,
             )
             answer = payload["output"]
-        elif action == "download":
-            import asyncio
+        elif action in {"download", "candidates"}:
+            from .downloads import DownloadEngine
 
-            from spotdl.download.downloader import Downloader
-            from spotdl.types.song import Song
-            from spotdl.utils.deno import get_deno_path
-            from spotdl.utils.ffmpeg import get_ffmpeg_path
-            from spotdl.utils.spotify import SpotifyClient
+            engine = DownloadEngine(request.parent, progress)
+            try:
+                if action == "candidates":
+                    from .matching import MatchError
 
-            ffmpeg = get_ffmpeg_path()
-            if not ffmpeg:
-                raise ValueError("Instale os componentes em Configurações → Preparar downloads.")
-            deno = get_deno_path()
-            if deno:
-                os.environ["PATH"] = str(deno.parent) + os.pathsep + os.environ.get("PATH", "")
-            SpotifyClient.init(client_id="", client_secret="", no_cache=True)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            settings = {
-                "output": str(Path(payload["output"]).resolve().parent / "{title}.{output-ext}"),
-                "format": "mp3",
-                "bitrate": "192k",
-                "ffmpeg": str(ffmpeg),
-                "ffmpeg_args": "-ar 44100 -ac 2 -id3v2_version 3",
-                "threads": 1,
-                "lyrics_providers": [],
-                "audio_providers": ["youtube-music", "youtube"],
-                "overwrite": "force",
-                "simple_tui": True,
-                "skip_album_art": True,
-            }
-            downloader = Downloader(settings=settings, loop=loop)
-            song = Song.from_missing_data(**payload["metadata"])
-            _, path = downloader.download_song(song)
-            if path is None or not Path(path).is_file():
-                raise ValueError("Áudio indisponível ou bloqueado pelo provedor. Tente novamente mais tarde.")
-            target = Path(payload["output"]).resolve()
-            actual = Path(path).resolve()
-            if not actual.is_relative_to(target.parent):
-                raise ValueError("O mecanismo retornou um arquivo fora da pasta temporária.")
-            if actual != target:
-                os.replace(actual, target)
-            answer = str(target)
-            loop.close()
+                    try:
+                        answer = engine.matcher.candidates(payload["metadata"])
+                    except MatchError:
+                        if not engine.matcher.last_candidates:
+                            raise
+                        answer = engine.matcher.last_candidates
+                else:
+                    answer = engine.download(payload["metadata"], payload["output"])
+            finally:
+                engine.close()
+        elif action == "session":
+            from .downloads import session_worker
+
+            answer = session_worker(request.parent, progress, payload)
         else:
             raise ValueError("Operação desconhecida.")
         atomic_json(result, {"result": answer})
     except Exception as exc:
         # Only return a bounded diagnostic. Do not persist provider output/cookies/tokens.
-        import re
+        from .telemetry import sanitize
 
-        message = re.sub(r"(?i)(token|secret|authorization|password)([=: ]+)\S+", r"\1\2[oculto]", str(exc))
-        atomic_json(result, {"error": f"{type(exc).__name__}: {message[:700]}"})
+        message = sanitize(str(exc))
+        diagnostic = engine.diagnostic() if "engine" in locals() else {}
+        atomic_json(result, {"error": f"{type(exc).__name__}: {message[:1800]}", "diagnostic": diagnostic})

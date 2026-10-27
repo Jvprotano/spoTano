@@ -1,32 +1,26 @@
 """Incremental library operations, independent of the network adapter and GUI."""
 
 import json
-import os
 import re
 import shutil
 import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
 
+from .audio import DurationMismatch, needs_genre, validate_duration, validate_mp3, write_genre
+from .files import AudioFiles
 from .genres import CATEGORIES, GenreResolver
-from .paths import digest, inside, safe_name
+from .paths import digest, inside, playlist_url, safe_name
 from .provider import Cancelled
+from .telemetry import RunMetrics, sanitize
 
 
 def now():
     return datetime.now(UTC).isoformat(timespec="seconds")
-
-
-def validate_mp3(path: Path):
-    from mutagen.mp3 import MP3
-
-    info = MP3(path).info
-    if info.length <= 0 or info.bitrate <= 0:
-        raise ValueError("O arquivo obtido não é um MP3 válido.")
-    if info.sample_rate != 44100 or info.channels != 2:
-        raise ValueError("MP3 fora do perfil automotivo (44,1 kHz / estéreo).")
 
 
 @dataclass
@@ -38,6 +32,8 @@ class SyncPlan:
     removed: list = field(default_factory=list)
     retained: int = 0
     force: bool = False
+    warnings: list = field(default_factory=list)
+    refresh_metadata: bool = True
 
 
 class Library:
@@ -47,6 +43,8 @@ class Library:
         self.validator = validator
         self.music = self.store.root / "Music"
         self.music.mkdir(exist_ok=True)
+        self.files = AudioFiles(store, progress)
+        self.files.recover()
 
     def check_cancel(self):
         if self.cancel.is_set():
@@ -58,50 +56,158 @@ class Library:
         path = inside(self.music, track["path"])
         return path.is_file() and digest(path) == track["sha256"]
 
-    def preview(self, force=False):
+    def validate_snapshot(self, snapshot):
+        if not isinstance(snapshot, dict) or not isinstance(snapshot.get("tracks"), list):
+            raise ValueError("Snapshot inválido; biblioteca preservada.")
+        if not snapshot.get("name"):
+            raise ValueError("Nome da playlist ausente.")
+        for track in snapshot["tracks"]:
+            if not re.fullmatch(r"[A-Za-z0-9]{22}", track.get("song_id", "")):
+                raise ValueError("Identificador de faixa inválido.")
+            if not track.get("name") or not track.get("artist"):
+                raise ValueError("Metadados de faixa incompletos.")
+
+    def save_snapshot(self, db, playlist_id, snapshot):
+        for track in snapshot["tracks"]:
+            db.execute(
+                """INSERT INTO tracks(id,metadata) VALUES(?,?)
+                ON CONFLICT(id) DO UPDATE SET metadata=excluded.metadata""",
+                (track["song_id"], json.dumps(track, ensure_ascii=False)),
+            )
+        db.execute("DELETE FROM membership WHERE playlist_id=?", (playlist_id,))
+        db.executemany(
+            "INSERT OR IGNORE INTO membership VALUES(?,?,?)",
+            [(playlist_id, track["song_id"], position) for position, track in enumerate(snapshot["tracks"])],
+        )
+        skipped = snapshot.get("skipped", 0)
+        db.execute(
+            "UPDATE playlists SET name=?,synced_at=?,warning=?,total=? WHERE id=?",
+            (
+                snapshot["name"],
+                now(),
+                f"{skipped} itens não suportados" if skipped else "",
+                snapshot.get("total", len(snapshot["tracks"])),
+                playlist_id,
+            ),
+        )
+
+    def import_playlist(self, url):
+        url = playlist_url(url)
+        if self.store.rows("SELECT id FROM playlists WHERE url=?", (url,)):
+            raise ValueError("Playlist já importada. Marque-a para baixar ou atualizar os áudios.")
+        self.progress("Importando playlist: consultando nome e faixas no Spotify…")
+        snapshot = self.provider.playlist(url)
+        self.validate_snapshot(snapshot)
+        self.check_cancel()
+        with self.store.connect() as db:
+            playlist_id = db.execute(
+                "INSERT INTO playlists(url,name) VALUES(?,?)", (url, snapshot["name"])
+            ).lastrowid
+            self.save_snapshot(db, playlist_id, snapshot)
+            self.store.bump(db)
+        self.progress(
+            f"Importada: {snapshot['name']} · {len(snapshot['tracks'])} faixas disponíveis. "
+            "Marque a playlist para baixar os áudios."
+        )
+        return playlist_id
+
+    def preview(self, force=False, playlist_ids=None):
         revision = self.store.setting("revision")
         playlists = self.store.playlists()
+        if playlist_ids is not None:
+            requested = set(playlist_ids)
+            playlists = [p for p in playlists if p["id"] in requested]
+            if not requested or {p["id"] for p in playlists} != requested:
+                raise ValueError("Marque pelo menos uma playlist válida.")
         if not playlists:
             raise ValueError("Adicione pelo menos uma playlist.")
-        plan = SyncPlan(revision=revision, snapshots=[], force=force)
+        plan = SyncPlan(revision=revision, snapshots=[], force=force, refresh_metadata=not force)
         desired = {}
         for playlist in playlists:
             self.check_cancel()
-            self.progress(f"Lendo {playlist['name']}…")
-            snapshot = self.provider.playlist(playlist["url"])
-            if not isinstance(snapshot.get("tracks"), list):
-                raise ValueError("Snapshot inválido; biblioteca preservada.")
-            old = {
+            if force:
+                if not playlist["synced_at"]:
+                    raise ValueError(
+                        f"{playlist['name']}: use Atualizar selecionadas para consultar a lista primeiro."
+                    )
+                self.progress(
+                    f"Usando lista salva: {playlist['name']} · última consulta {playlist['synced_at']}."
+                )
+                snapshot = {
+                    "name": playlist["name"],
+                    "total": playlist["total"],
+                    "skipped": max(0, (playlist["total"] or playlist["count"]) - playlist["count"]),
+                    "tracks": [
+                        json.loads(row["metadata"])
+                        for row in self.store.rows(
+                            """SELECT t.metadata FROM membership m JOIN tracks t ON t.id=m.track_id
+                        WHERE m.playlist_id=? ORDER BY m.position""",
+                            (playlist["id"],),
+                        )
+                    ],
+                }
+                plan.warnings.append(
+                    f"{playlist['name']}: usa a lista já salva; para buscar mudanças no Spotify, "
+                    "use Atualizar selecionadas após concluir o primeiro download."
+                )
+            else:
+                self.progress(f"Lendo {playlist['name']}…")
+                snapshot = self.provider.playlist(playlist["url"])
+            self.validate_snapshot(snapshot)
+            current_ids = {
                 r["track_id"]
                 for r in self.store.rows(
                     "SELECT track_id FROM membership WHERE playlist_id=?", (playlist["id"],)
                 )
             }
+            previous = {
+                r["track_id"]: json.loads(r["metadata"])
+                for r in self.store.rows(
+                    "SELECT track_id,metadata FROM download_membership WHERE playlist_id=?", (playlist["id"],)
+                )
+            }
+            old = set(previous)
+            if old and not playlist["downloaded_at"]:
+                plan.warnings.append(
+                    f"{snapshot['name']}: catálogo antigo; a referência é a última lista "
+                    "salva, sem confirmação histórica de download concluído."
+                )
+            if snapshot.get("skipped", 0):
+                plan.warnings.append(
+                    f"{snapshot['name']}: {snapshot['skipped']} itens indisponíveis ou "
+                    "não suportados não serão baixados."
+                )
             ids = set()
             for track in snapshot["tracks"]:
-                if not re.fullmatch(r"[A-Za-z0-9]{22}", track.get("song_id", "")):
-                    raise ValueError("Identificador de faixa inválido.")
                 ids.add(track["song_id"])
                 desired[track["song_id"]] = track
             # Unknown/local/deleted items cannot prove that former tracks were removed.
-            if snapshot.get("skipped", 0) and old - ids:
+            if snapshot.get("skipped", 0) and (old | current_ids) - ids:
                 raise ValueError(
                     f"{snapshot['name']}: há itens indisponíveis e possíveis remoções. "
                     "O estado anterior foi preservado. Resolva os itens no Spotify e atualize."
                 )
-            plan.added.extend((playlist["name"], desired[i]["name"]) for i in sorted(ids - old))
-            previous = {r["id"]: json.loads(r["metadata"]) for r in self.store.tracks()}
-            plan.removed.extend((playlist["name"], previous[i]["name"]) for i in sorted(old - ids))
+            plan.added.extend((snapshot["name"], desired[i]["name"]) for i in sorted(ids - old))
+            plan.removed.extend((snapshot["name"], previous[i]["name"]) for i in sorted(old - ids))
             plan.snapshots.append((playlist["id"], snapshot))
+            self.progress(
+                f"Lida: {snapshot['name']} · {len(ids)} faixas · "
+                f"{len(ids - old)} inclusões · {len(old - ids)} saídas desde o último download."
+            )
         existing = {t["id"]: t for t in self.store.tracks()}
         for track_id, metadata in desired.items():
             self.check_cancel()
+            self.progress(f"Verificando arquivo local: {metadata['artist']} — {metadata['name']}")
             if force or track_id not in existing or not self.available(existing[track_id]):
                 plan.downloads.append(metadata)
             else:
                 plan.retained += 1
         if revision != self.store.setting("revision"):
             raise ValueError("A biblioteca mudou durante a consulta. Gere outra prévia.")
+        self.progress(
+            f"Prévia pronta: {len(plan.downloads)} downloads · {plan.retained} reutilizadas. "
+            "Aguardando confirmação."
+        )
         return plan
 
     def relative_path(self, track_id, metadata, category):
@@ -111,114 +217,246 @@ class Library:
         )
 
     def apply(self, plan):
+        workers = max(1, min(4, int(self.store.setting("download_workers", 2))))
+        run = RunMetrics(self.store, len(plan.downloads), plan.retained, workers)
+        self.last_run = run.directory
+        self.progress(f"Execução {run.run_id} · métricas e diagnóstico em {run.directory}")
+        if hasattr(self.provider, "download_settings"):
+            self.provider.download_settings = {"conversion_workers": self.store.setting("conversion_workers", 2)}
+        try:
+            result = self._apply(plan, run)
+            run.finish("completed_with_errors" if result["failures"] else "completed", **result)
+            result["run_directory"] = str(run.directory)
+            return result
+        except BaseException as exc:
+            run.finish("cancelled" if isinstance(exc, Cancelled) else "failed", error=str(exc))
+            raise
+
+    def _apply(self, plan, run):
+        with GenreResolver(self.store, self.progress, self.cancel) as resolver:
+            return self._apply_with_resolver(plan, run, resolver)
+
+    def _apply_with_resolver(self, plan, run, resolver):
         self.check_cancel()
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             revision = int(db.execute("SELECT value FROM settings WHERE key='revision'").fetchone()[0])
             if revision != plan.revision:
                 raise ValueError("Prévia desatualizada. Gere uma nova prévia.")
-            for playlist_id, snapshot in plan.snapshots:
-                for track in snapshot["tracks"]:
-                    db.execute(
-                        """INSERT INTO tracks(id,metadata) VALUES(?,?)
-                        ON CONFLICT(id) DO UPDATE SET metadata=excluded.metadata""",
-                        (track["song_id"], json.dumps(track, ensure_ascii=False)),
-                    )
-                db.execute("DELETE FROM membership WHERE playlist_id=?", (playlist_id,))
-                for position, track in enumerate(snapshot["tracks"]):
-                    db.execute(
-                        "INSERT OR IGNORE INTO membership VALUES(?,?,?)",
-                        (playlist_id, track["song_id"], position),
-                    )
-                db.execute(
-                    "UPDATE playlists SET name=?,synced_at=?,warning=? WHERE id=?",
-                    (
-                        snapshot["name"],
-                        now(),
-                        f"{snapshot.get('skipped', 0)} itens não suportados",
-                        playlist_id,
-                    ),
-                )
+            if plan.refresh_metadata:
+                for playlist_id, snapshot in plan.snapshots:
+                    self.save_snapshot(db, playlist_id, snapshot)
             self.store.bump(db)
-        resolver = GenreResolver(self.store)
         failures = []
         total = len(plan.downloads)
-        for index, metadata in enumerate(plan.downloads, 1):
+        failed_ids = set()
+        workers = max(1, min(4, int(self.store.setting("download_workers", 2))))
+        self.progress(
+            f"Iniciando: {total} downloads; {plan.retained} arquivos serão reutilizados; "
+            f"até {workers} músicas em paralelo."
+        )
+        batch_started = time.monotonic()
+        completed = 0
+        current_tracks = {row["id"]: row for row in self.store.tracks()}
+
+        def report_batch():
+            self.progress(
+                {
+                    "kind": "batch_progress",
+                    "total": total,
+                    "completed": completed,
+                    "failed": len(failures),
+                    "reused": plan.retained,
+                }
+            )
+
+        report_batch()
+
+        def download(index, metadata):
             self.check_cancel()
+            started = time.monotonic()
             track_id = metadata["song_id"]
-            self.progress(f"{index}/{total} · {metadata['artist']} — {metadata['name']}")
+            label = f"{index}/{total} · {metadata['artist']} — {metadata['name']}"
+            self.progress(f"Classificando gênero · {label}")
             staging = self.store.root / "staging" / uuid.uuid4().hex
             staging.mkdir(parents=True)
             try:
-                current = self.store.rows("SELECT * FROM tracks WHERE id=?", (track_id,))[0]
-                category = current["override"] or resolver.resolve(metadata)
+                current = current_tracks[track_id]
+
+                def classify_track():
+                    began = time.monotonic()
+                    category = current["override"] or resolver.resolve(metadata)
+                    run.record("classification", track_id=track_id, category=category,
+                               seconds=round(time.monotonic() - began, 3))
+                    return category
+
+                classification = genre_pool.submit(classify_track)
                 self.check_cancel()
                 output = staging / "audio.mp3"
-                self.provider.download(metadata, output)
+                source = self.store.rows("SELECT url FROM audio_sources WHERE track_id=?", (track_id,))
+                request = {**metadata, "_cached_match": self.store.audio_match(metadata),
+                           "_source_url": source[0]["url"] if source else None}
+                run.record("track_start", track_id=track_id, name=metadata["name"], artist=metadata["artist"],
+                           expected_duration=metadata.get("duration"), cache_hit=bool(request["_cached_match"]))
+                self.progress(f"Iniciando download · {label}")
+                try:
+                    evidence = self.provider.download(request, output)
+                except Exception:
+                    if request["_cached_match"]:
+                        with self.store.connect() as db:
+                            db.execute("DELETE FROM audio_matches WHERE track_id=?", (track_id,))
+                    raise
+                category = classification.result()
                 self.check_cancel()
-                self.validator(output)
-                file_hash = digest(output)
+                self.progress(f"Validando MP3 e calculando SHA-256 · {label}")
+                if self.validator is validate_mp3:
+                    write_genre(output, category)
+                info = self.validator(output)
+                if self.validator is validate_mp3:
+                    validate_duration(info.length, metadata.get("duration"))
                 relative = self.relative_path(track_id, metadata, category)
-                target = inside(self.music, relative)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if target.exists() and (current["path"] != relative or digest(target) != current["sha256"]):
-                    raise ValueError("Arquivo local alterado ou desconhecido; preservado para revisão.")
-                # If replacement changes content, retain the old bytes before replacing them.
-                if target.exists() and file_hash != current["sha256"]:
-                    backup = inside(self.store.root, "trash/" + uuid.uuid4().hex + "/" + relative)
-                    backup.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(target, backup)
-                os.replace(output, target)
-                with self.store.connect() as db:
-                    db.execute(
-                        "UPDATE tracks SET path=?,sha256=?,category=?,status='ready',error='',updated_at=? WHERE id=?",
-                        (relative, file_hash, category, now(), track_id),
-                    )
-                    self.store.bump(db)
-                # Old path may remain after an interrupted reorganization. Never remove it blindly.
+                from .matching import fingerprint
+
+                match = evidence.get("match") if isinstance(evidence, dict) else None
+                self.files.install(output, current, relative, category,
+                                   match=match if match and match.get("version") else None,
+                                   fingerprint=fingerprint(metadata))
+                run.record("track_finished", track_id=track_id, status="ready", category=category,
+                           seconds=round(time.monotonic() - started, 3),
+                           evidence=evidence if isinstance(evidence, dict) else {})
+                self.progress(f"Salvo · {label} · {relative}")
+                self.progress(f"Tempo total da faixa · {label} · {time.monotonic() - started:.1f}s")
             except Cancelled:
                 raise
             except Exception as exc:
-                failures.append((metadata["name"], str(exc)))
+                message = sanitize(str(exc))
                 with self.store.connect() as db:
+                    if isinstance(exc, DurationMismatch):
+                        db.execute("DELETE FROM audio_matches WHERE track_id=?", (track_id,))
                     db.execute(
-                        "UPDATE tracks SET status='error',error=? WHERE id=?", (str(exc)[:700], track_id)
+                        "UPDATE tracks SET status='error',error=? WHERE id=?", (message[:1800], track_id)
                     )
-                self.progress(f"Falha: {metadata['name']} · {exc}")
+                run.record("track_finished", track_id=track_id, status="error", error=message,
+                           seconds=round(time.monotonic() - started, 3), evidence=getattr(exc, "diagnostic", {}))
+                self.progress(f"Falha: {metadata['name']} · {message}")
+                return track_id, (metadata["name"], message)
             finally:
                 shutil.rmtree(staging)
+            return track_id, None
+
+        pool_context = (
+            self.provider.download_batch if hasattr(self.provider, "download_batch") else nullcontext
+        )
+        with (
+            pool_context(),
+            ThreadPoolExecutor(max_workers=workers, thread_name_prefix="spotano-genres") as genre_pool,
+            ThreadPoolExecutor(max_workers=workers, thread_name_prefix="spotano-download") as pool,
+        ):
+            # Submit only a bounded window, so cancellation doesn't leave hundreds of queued jobs.
+            iterator = iter(enumerate(plan.downloads, 1))
+            pending = {
+                pool.submit(download, *item)
+                for item in [next(iterator, None) for _ in range(workers)]
+                if item is not None
+            }
+            while pending:
+                future = next(as_completed(pending))
+                pending.remove(future)
+                try:
+                    track_id, failure = future.result()
+                except BaseException:
+                    self.cancel.set()
+                    for other in pending:
+                        other.cancel()
+                    raise
+                if failure:
+                    failed_ids.add(track_id)
+                    failures.append(failure)
+                completed += 1
+                report_batch()
+                self.progress(
+                    f"Progresso do lote: {completed}/{total} faixas finalizadas; {len(failures)} falhas."
+                )
+                self.check_cancel()
+                item = next(iterator, None)
+                if item is not None:
+                    pending.add(pool.submit(download, *item))
+
+        # Repair unknown categories in reused audio too, without another download.
+        selected_ids = {t["song_id"] for _, snapshot in plan.snapshots for t in snapshot["tracks"]}
+        downloaded_ids = {track["song_id"] for track in plan.downloads}
+        for track in self.store.tracks():
+            self.check_cancel()
+            if (
+                track["id"] in selected_ids
+                and track["id"] not in failed_ids
+                and track["id"] not in downloaded_ids
+                and track["path"]
+                and not track["override"]
+                and (track["category"] == "Outros" or resolver.needs_refresh(json.loads(track["metadata"])))
+            ):
+                category = resolver.resolve(json.loads(track["metadata"]))
+                if category != track["category"]:
+                    with self.store.connect() as db:
+                        db.execute("UPDATE tracks SET category=? WHERE id=?", (category, track["id"]))
+                        self.store.bump(db)
         self.reorganize()
+        # Advance each playlist independently only after its entire download succeeds.
+        for playlist_id, snapshot in plan.snapshots:
+            self.check_cancel()
+            if failed_ids.intersection(t["song_id"] for t in snapshot["tracks"]):
+                continue
+            with self.store.connect() as db:
+                db.execute("DELETE FROM download_membership WHERE playlist_id=?", (playlist_id,))
+                db.executemany(
+                    "INSERT OR IGNORE INTO download_membership VALUES(?,?,?)",
+                    [
+                        (playlist_id, t["song_id"], json.dumps(t, ensure_ascii=False))
+                        for t in snapshot["tracks"]
+                    ],
+                )
+                db.execute("UPDATE playlists SET downloaded_at=? WHERE id=?", (now(), playlist_id))
+                self.store.bump(db)
         self.store.log(
             "sync", f"{total - len(failures)} downloads; {plan.retained} reutilizadas; {len(failures)} falhas"
+        )
+        self.progress(
+            f"Finalizado: {total - len(failures)} downloads · {plan.retained} reutilizadas · "
+            f"{len(failures)} falhas · {time.monotonic() - batch_started:.1f}s no lote."
         )
         return {"downloaded": total - len(failures), "reused": plan.retained, "failures": failures}
 
     def reorganize(self):
+        pending = {json.loads(row["payload"])["track_id"]
+                   for row in self.store.rows("SELECT payload FROM file_transitions")}
         for track in self.store.tracks():
             self.check_cancel()
-            if not track["path"]:
+            if not track["path"] or track["id"] in pending:
                 continue
             metadata = json.loads(track["metadata"])
             relative = self.relative_path(track["id"], metadata, track["override"] or track["category"])
-            if relative == track["path"]:
-                continue
             source, target = inside(self.music, track["path"]), inside(self.music, relative)
             if not source.is_file():
                 continue
+            category = track["override"] or track["category"]
+            if relative == track["path"] and (self.validator is not validate_mp3
+                                               or not needs_genre(source, category)):
+                continue
             if digest(source) != track["sha256"]:
                 raise ValueError("Arquivo modificado externamente; reorganização bloqueada: " + str(source))
-            target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists() and digest(target) != track["sha256"]:
                 raise ValueError("Conflito de nomes na reorganização: " + str(target))
-            # Copy first, commit new path, then remove old verified copy. Crash-safe on both sides.
-            from .paths import atomic_copy
-
-            if not target.exists():
-                atomic_copy(source, target, track["sha256"])
-            with self.store.connect() as db:
-                db.execute("UPDATE tracks SET path=? WHERE id=?", (relative, track["id"]))
-                self.store.bump(db)
-            source.unlink()
+            staging = self.store.root / "staging" / uuid.uuid4().hex
+            staging.mkdir(parents=True)
+            try:
+                output = staging / "audio.mp3"
+                shutil.copyfile(source, output)
+                if self.validator is validate_mp3:
+                    write_genre(output, category)
+                    self.validator(output)
+                self.files.install(output, track, relative, category)
+            finally:
+                shutil.rmtree(staging)
 
     def correct_genre(self, track_id, category):
         if category and category not in {*CATEGORIES, "Outros"}:
@@ -226,6 +464,42 @@ class Library:
         with self.store.connect() as db:
             db.execute("UPDATE tracks SET override=? WHERE id=?", (category or None, track_id))
             self.store.bump(db)
+        if not category:
+            row = self.store.rows("SELECT metadata FROM tracks WHERE id=?", (track_id,))[0]
+            with GenreResolver(self.store, self.progress, self.cancel) as resolver:
+                automatic = resolver.resolve(json.loads(row["metadata"]))
+            with self.store.connect() as db:
+                db.execute("UPDATE tracks SET category=? WHERE id=?", (automatic, track_id))
+                self.store.bump(db)
+        self.reorganize()
+
+    def correct_artist(self, track_id, category):
+        from .genres import GenreResolver
+
+        if category and category not in {*CATEGORIES, "Outros"}:
+            raise ValueError("Categoria inválida.")
+        row = self.store.rows("SELECT metadata FROM tracks WHERE id=?", (track_id,))[0]
+        metadata = json.loads(row["metadata"])
+        key = GenreResolver(self.store).artist_identity(metadata)
+        with self.store.connect() as db:
+            if category:
+                db.execute("INSERT OR REPLACE INTO artist_categories VALUES(?,?)", (key, category))
+            else:
+                db.execute("DELETE FROM artist_categories WHERE artist=?", (key,))
+            self.store.bump(db)
+        self.reclassify(force=False, artist=key)
+
+    def reclassify(self, force=True, artist=None):
+        with GenreResolver(self.store, self.progress, self.cancel, force=force) as resolver:
+            for track in self.store.tracks():
+                self.check_cancel()
+                metadata = json.loads(track["metadata"])
+                if track["override"] or (artist and resolver.artist_identity(metadata) != artist):
+                    continue
+                category = resolver.resolve(metadata)
+                with self.store.connect() as db:
+                    db.execute("UPDATE tracks SET category=? WHERE id=?", (category, track["id"]))
+                    self.store.bump(db)
         self.reorganize()
 
     def orphan_preview(self):

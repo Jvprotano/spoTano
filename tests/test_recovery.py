@@ -5,7 +5,7 @@ from test_library import P1, A, FakeProvider, snapshot, track
 
 from spotano.db import Store
 from spotano.exporter import Exporter
-from spotano.genres import GenreResolver
+from spotano.genres import GENRE_VERSION, GenreResolver
 from spotano.library import Library
 from spotano.paths import atomic_copy, digest, inside
 
@@ -26,12 +26,16 @@ def test_genre_cache_avoids_network_and_manual_correction_has_priority(tmp_path,
 
     with store.connect() as db:
         db.execute(
-            "INSERT INTO genre_cache VALUES(?,?,?)", ("Artista", json.dumps(["indie rock"]), time.time())
+            "INSERT INTO genre_cache VALUES(?,?,?)",
+            ("Artista", json.dumps({"version": GENRE_VERSION, "tags": ["indie rock"]}), time.time()),
         )
     import requests
 
-    monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("network must not be used"))
+    monkeypatch.setattr(requests.Session, "get", lambda *a, **kw: pytest.fail("network must not be used"))
     assert GenreResolver(store).resolve({"artist": "Artista", "genres": []}) == "Rock e Metal"
+    with store.connect() as db:
+        db.execute("INSERT INTO artist_categories VALUES(?,?)", ("artista", "Sertanejo"))
+    assert GenreResolver(store).resolve({"artist": "Artista", "genres": []}) == "Sertanejo"
 
 
 def test_modified_library_file_is_never_overwritten_by_forced_download(tmp_path):
@@ -61,7 +65,7 @@ def test_export_after_interruption_reuses_already_verified_new_copy(tmp_path):
     # Simulate termination after atomic copy but before committing the manifest.
     relative = plan.copy[0]
     target = inside(plan.root, relative)
-    atomic_copy(inside(lib.music, relative), target, plan.desired[relative]["sha256"])
+    atomic_copy(inside(lib.music, plan.desired[relative]["source"]), target, plan.desired[relative]["sha256"])
     resumed = exporter.preview(usb)
     assert resumed.reused == 1 and resumed.copy == []
     exporter.apply(resumed)

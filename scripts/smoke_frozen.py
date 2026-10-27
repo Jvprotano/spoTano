@@ -49,9 +49,14 @@ def main():
                 "metadata": {"name": "Generated test", "artist": "spoTano"},
             },
         )
+        events = [
+            json.loads(line)["message"]
+            for line in (root / "progress.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert any("convertendo áudio local" in event for event in events), events
         info = MP3(result).info
         assert info.sample_rate == 44100 and info.channels == 2 and info.length > 0
-        print("Frozen worker OK: SDK imports, FFmpeg, real MP3 transcoding and tags.")
+        print("Frozen worker OK: SDK imports, FFmpeg, real MP3 transcoding, tags and progress events.")
 
 
 if __name__ == "__main__":

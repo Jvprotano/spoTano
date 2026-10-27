@@ -18,8 +18,19 @@ CREATE TABLE IF NOT EXISTS membership(
  playlist_id INTEGER REFERENCES playlists(id) ON DELETE CASCADE,
  track_id TEXT REFERENCES tracks(id), position INTEGER NOT NULL,
  PRIMARY KEY(playlist_id, track_id));
+CREATE TABLE IF NOT EXISTS download_membership(
+ playlist_id INTEGER REFERENCES playlists(id) ON DELETE CASCADE,
+ track_id TEXT NOT NULL, metadata TEXT NOT NULL,
+ PRIMARY KEY(playlist_id, track_id));
 CREATE TABLE IF NOT EXISTS genre_cache(
  artist TEXT PRIMARY KEY, genres TEXT NOT NULL, fetched_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS audio_matches(
+ track_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, evidence TEXT NOT NULL, updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS audio_sources(track_id TEXT PRIMARY KEY, url TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS artist_categories(artist TEXT PRIMARY KEY, category TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS genre_evidence(track_id TEXT PRIMARY KEY, evidence TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS genre_queries(key TEXT PRIMARY KEY, payload TEXT NOT NULL, fetched_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS file_transitions(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS history(
  id INTEGER PRIMARY KEY, time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  action TEXT NOT NULL, detail TEXT NOT NULL);
@@ -34,9 +45,26 @@ class Store:
         with self.connect() as db:
             db.executescript(SCHEMA)
             db.execute("PRAGMA journal_mode=WAL")
+            db.execute("BEGIN IMMEDIATE")
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(playlists)")}
+            for name, definition in {
+                "total": "INTEGER",
+                "downloaded_at": "TEXT",
+                "output_group": "TEXT NOT NULL DEFAULT ''",
+            }.items():
+                if name not in columns:
+                    db.execute(f"ALTER TABLE playlists ADD COLUMN {name} {definition}")
+            if "downloaded_at" not in columns:
+                # Preserve the last known playlist comparison for older catalogs.
+                db.execute("""INSERT OR IGNORE INTO download_membership
+                    SELECT m.playlist_id,m.track_id,t.metadata FROM membership m
+                    JOIN tracks t ON t.id=m.track_id""")
             db.execute("INSERT OR IGNORE INTO settings VALUES('revision', '0')")
             db.execute("INSERT OR IGNORE INTO settings VALUES('by_genre', 'true')")
             db.execute("INSERT OR IGNORE INTO settings VALUES('musicbrainz', 'true')")
+            db.execute("INSERT OR IGNORE INTO settings VALUES('output_layout', '\"unified\"')")
+            db.execute("INSERT OR IGNORE INTO settings VALUES('download_workers', '2')")
+            db.execute("INSERT OR IGNORE INTO settings VALUES('conversion_workers', '2')")
 
     @contextmanager
     def connect(self):
@@ -74,10 +102,20 @@ class Store:
                 "INSERT INTO playlists(url,name) VALUES(?,?)", (playlist_url(url), name.strip() or "Playlist")
             )
             self.bump(db)
+            return db.execute("SELECT id FROM playlists WHERE url=?", (playlist_url(url),)).fetchone()[0]
 
     def remove_playlist(self, playlist_id):
         with self.connect() as db:
             db.execute("DELETE FROM playlists WHERE id=?", (playlist_id,))
+            self.bump(db)
+
+    def set_output_group(self, playlist_ids, name):
+        # Preserve user labels; filesystem normalization/disambiguation happens at export.
+        name = name.strip()[:120]
+        with self.connect() as db:
+            db.executemany(
+                "UPDATE playlists SET output_group=? WHERE id=?", [(name, i) for i in playlist_ids]
+            )
             self.bump(db)
 
     def playlists(self):
@@ -99,3 +137,42 @@ class Store:
     def backup(self, target: Path):
         with self.connect() as db, sqlite3.connect(target) as dest:
             db.backup(dest)
+
+    def audio_match(self, metadata):
+        from .matching import MATCH_VERSION, canonical_youtube, fingerprint
+
+        rows = self.rows("SELECT * FROM audio_matches WHERE track_id=?", (metadata["song_id"],))
+        if not rows or rows[0]["fingerprint"] != fingerprint(metadata):
+            return None
+        value = json.loads(rows[0]["evidence"])
+        try:
+            value["url"] = canonical_youtube(value["url"])
+        except (ValueError, KeyError, TypeError):
+            return None
+        return value if value.get("version") == MATCH_VERSION else None
+
+    def save_audio_match(self, metadata, evidence):
+        import time
+
+        from .matching import fingerprint
+
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO audio_matches VALUES(?,?,?,?)",
+                       (metadata["song_id"], fingerprint(metadata), json.dumps(evidence), time.time()))
+
+    def set_audio_source(self, track_id, url):
+        from .matching import canonical_youtube
+
+        url = canonical_youtube(url) if url.strip() else ""
+        with self.connect() as db:
+            if url:
+                db.execute("INSERT OR REPLACE INTO audio_sources VALUES(?,?)", (track_id, url))
+            else:
+                db.execute("DELETE FROM audio_sources WHERE track_id=?", (track_id,))
+            db.execute("DELETE FROM audio_matches WHERE track_id=?", (track_id,))
+            self.bump(db)
+
+    def clear_audio_matches(self):
+        with self.connect() as db:
+            db.execute("DELETE FROM audio_matches")
+            self.bump(db)

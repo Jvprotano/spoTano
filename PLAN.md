@@ -1,5 +1,10 @@
 # Plano e evidência
 
+O plano das otimizações 1.1.0 está concluído em
+[docs/EXECUTION-OPTIMIZATION.md](docs/EXECUTION-OPTIMIZATION.md), com medições e
+[validação detalhada](docs/OPTIMIZATION-VALIDATION.md). A entrega local contém o
+executável e ZIP 1.1.0 para repetir o teste de dez faixas e avançar para duzentas.
+
 - [x] Pesquisar spotDL 4.6.0, yt-dlp, beets e documentação Kia/MusicBrainz.
 - [x] Escolher desktop Python/Tk + SQLite + adaptador isolado spotDL (MIT).
 - [x] Implementar importação completa, plano incremental, downloads atômicos e recuperação.

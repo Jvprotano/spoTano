@@ -1,5 +1,6 @@
 """Hash-based export: only owned paths, previews, atomic verified copies."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -8,7 +9,44 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import atomic_copy, atomic_json, digest, inside
+from .paths import atomic_copy, atomic_json, digest, inside, safe_name
+
+LAYOUTS = {
+    "unified": "Coleção unificada",
+    "playlists": "Uma pasta por playlist",
+    "groups": "Pastas por grupo",
+}
+
+
+def output_folders(playlists, layout):
+    """Stable disambiguation also handles names that collide after ASCII conversion."""
+    if layout not in LAYOUTS:
+        raise ValueError("Organização de saída inválida.")
+    if layout == "unified":
+        return {p["id"]: "" for p in playlists}
+    keys = {
+        p["id"]: (p["output_group"] or "Sem grupo")
+        if layout == "groups"
+        else (p["output_group"] or p["name"])
+        for p in playlists
+    }
+    folders = {}
+    # Different playlists always get different folders; exact group names intentionally merge.
+    used = {}
+    assigned = {}
+    for p in playlists:
+        key = keys[p["id"]]
+        identity = key if layout == "groups" else p["id"]
+        if identity in assigned:
+            folders[p["id"]] = assigned[identity]
+            continue
+        folder = safe_name(key, 48)
+        while folder.casefold() in used and used[folder.casefold()] != identity:
+            folder = f"{folder}_{p['id']}"
+        used[folder.casefold()] = identity
+        assigned[identity] = folder
+        folders[p["id"]] = folder
+    return folders
 
 
 @dataclass
@@ -39,6 +77,33 @@ def read_manifest(root):
     return data
 
 
+def export_paths(tracks):
+    """Human-readable names; stable, case-insensitive disambiguation across all layouts."""
+    bases = {}
+    for track in tracks:
+        metadata = json.loads(track["metadata"])
+        folder = str(Path(track["path"]).parent).replace("\\", "/")
+        name = safe_name(metadata["artist"] + " - " + metadata["name"], 90)
+        relative = (folder + "/" if folder != "." else "") + name
+        bases.setdefault(relative.casefold(), []).append((track["id"], relative))
+    assigned, used = {}, set()
+    # Reserve every natural name before adding suffixes, including names ending in (2).
+    reserved = {key + ".mp3" for key in bases}
+    for key, group in sorted(bases.items()):
+        for index, (identity, base) in enumerate(sorted(group), 1):
+            name = base + ".mp3" if len(group) == 1 else f"{base} ({index}).mp3"
+            if name.casefold() in used or (len(group) > 1 and name.casefold() in reserved):
+                # Only a real collision needs a short suffix. The full ID stays in the manifest.
+                suffix = hashlib.sha256(identity.encode()).hexdigest()
+                for size in range(6, 65):
+                    name = f"{base} ({suffix[:size]}).mp3"
+                    if name.casefold() not in used | reserved:
+                        break
+            assigned[identity] = name
+            used.add(name.casefold())
+    return assigned
+
+
 class Exporter:
     def __init__(self, library):
         self.library, self.store = library, library.store
@@ -57,18 +122,34 @@ class Exporter:
             raise ValueError("O destino deve ficar fora da biblioteca e não pode ser um link.")
         revision = self.store.setting("revision")
         manifest, desired = read_manifest(root), {}
+        layout = self.store.setting("output_layout", "unified")
+        playlists = self.store.playlists()
+        folders = output_folders(playlists, layout)
+        memberships = {}
+        for row in self.store.rows("SELECT playlist_id,track_id FROM membership"):
+            memberships.setdefault(row["track_id"], []).append(row["playlist_id"])
         tracks = self.store.tracks(active=True)
         if not tracks:
             raise ValueError("Não há faixas em playlists para exportar.")
+        names = export_paths([track for track in tracks if track["path"]])
         for track in tracks:
             self.library.check_cancel()
+            self.library.progress(
+                "Conferindo áudio para exportação: " + track["path"]
+                if track["path"]
+                else "Conferindo faixa pendente…"
+            )
             if not self.library.available(track):
                 raise ValueError("Há faixas ausentes ou alteradas. Atualize a biblioteca antes de exportar.")
-            desired[track["path"]] = {
-                "id": track["id"],
-                "sha256": track["sha256"],
-                "size": inside(self.library.music, track["path"]).stat().st_size,
-            }
+            for playlist_id in memberships[track["id"]]:
+                prefix = folders[playlist_id]
+                relative = f"{prefix}/{names[track['id']]}" if prefix else names[track["id"]]
+                desired[relative] = {
+                    "id": track["id"],
+                    "source": track["path"],
+                    "sha256": track["sha256"],
+                    "size": inside(self.library.music, track["path"]).stat().st_size,
+                }
         copies, removals, reused, required = [], [], 0, 0
         for relative, entry in desired.items():
             target = inside(root, relative)
@@ -115,7 +196,11 @@ class Exporter:
                     raise ValueError("Arquivo alterado após a prévia; destino preservado: " + relative)
                 backup = inside(plan.root, ".spotano-trash/" + batch + "/" + relative)
                 atomic_copy(target, backup, old_hash)
-            atomic_copy(inside(self.library.music, relative), target, plan.desired[relative]["sha256"])
+            atomic_copy(
+                inside(self.library.music, plan.desired[relative]["source"]),
+                target,
+                plan.desired[relative]["sha256"],
+            )
         self.library.check_cancel()
         # New manifest keeps pending obsolete entries until each quarantine succeeds.
         entries = dict(plan.desired)

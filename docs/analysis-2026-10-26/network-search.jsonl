@@ -1,0 +1,7 @@
+{"type": "search_query", "options": {"filter": "songs", "ignore_spelling": true, "limit": 50}, "results": 60, "seconds": 2.703}
+{"type": "search_query", "options": {"filter": "videos", "ignore_spelling": true, "limit": 50}, "results": 60, "seconds": 1.39}
+{"type": "candidate_metadata", "candidate": 1, "seconds": 8.515}
+{"type": "candidate_metadata", "candidate": 2, "seconds": 5.141}
+{"type": "candidate_metadata", "candidate": 3, "seconds": 7.25}
+{"type": "candidate_metadata", "candidate": 4, "seconds": 7.187}
+{"type": "final", "selected_url": "https://www.youtube.com/watch?v=S3OPdoM-We4", "seconds": 32.359, "counts": {"search_queries": 2, "candidate_metadata": 4}, "limitations": "One current search; duration from existing MP3; no media downloaded"}

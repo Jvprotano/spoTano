@@ -1,0 +1,11 @@
+﻿index,track,status,category,classification_and_lock_s,preparation_and_dispatch_s,search_s,search_until_failure_s,extraction_before_transfer_s,transfer_s,conversion_to_tags_s,tags_and_validation_s,total_s,start,search,saved,path,log_line
+1,Felipe e Rodrigo — Pós - Ao Vivo,ready,Outros,8,10,49,,9,0,13,1,90.4,17:38:02,17:38:20,17:39:33,Outros/Felipe e Rodrigo - Pos - Ao Vivo [1uDn0nbzeGPVw97jp7SvzR].mp3,250
+2,Hugo & Guilherme — Flash - Ao Vivo,ready,Sertanejo,8,10,47,,10,0,13,1,88.4,17:38:02,17:38:20,17:39:31,Sertanejo/Hugo _ Guilherme - Flash - Ao Vivo [3rRihXlOCLUlkQTzglpwCi].mp3,251
+3,Chris Stapleton — White Horse,ready,Rock e Metal,2,8,72,,9,1,13,0,104.9,17:38:02,17:38:12,17:39:47,Rock e Metal/Chris Stapleton - White Horse [7MSWxMumjz6lHj7oRApNbg].mp3,252
+4,Guns N' Roses — Sweet Child O' Mine,ready,Rock e Metal,5,0,86,,9,0,32,0,132.7,17:39:31,17:39:36,17:41:43,Rock e Metal/Guns N_ Roses - Sweet Child O_ Mine [7snQQk1zcKl8gZ92AnueZW].mp3,330
+5,The Drums — Money,ready,Rock e Metal,5,1,45,,9,0,19,0,78.9,17:39:33,17:39:39,17:40:52,Rock e Metal/The Drums - Money [3VIJBrMpvimHEw5wtPh2wB].mp3,342
+6,Jeninho — Peão Todo Tatuado,ready,Outros,3,1,155,,9,0,15,0,184.2,17:39:47,17:39:51,17:42:51,Outros/Jeninho - Peao Todo Tatuado [1wrA9K1P177mkPNt9BB2OZ].mp3,377
+7,"Rincon — Não é Pressa, é Pressão",ready,Outros,5,0,114,,9,0,13,1,142.1,17:40:52,17:40:57,17:43:14,Outros/Rincon - Nao e Pressa_ e Pressao [7DHAuCYRhuJVJPCwbFJA08].mp3,429
+8,Pineapple StormTv — Poesia Acústica #2: Sobre Nós,error,,4,0,,81,,,,,85,17:41:43,17:41:47,,,488
+9,Duda Bertelli — Ponto Fraco - Ao Vivo,ready,Outros,7,0,32,,8,0,10,0,56.2,17:42:51,17:42:58,17:43:48,Outros/Duda Bertelli - Ponto Fraco - Ao Vivo [5Q6vcrKZZxLQnNjfDTDWFY].mp3,540
+10,Hugo & Guilherme — Flash (Minha Mente) 💠,ready,Sertanejo,0,0,28,,7,0,7,0,43.3,17:43:08,17:43:08,17:43:51,Sertanejo/Hugo _ Guilherme - Flash (Minha Mente) [4mTwKZPVhgWs6olQWxtUEG].mp3,563

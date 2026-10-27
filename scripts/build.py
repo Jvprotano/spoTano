@@ -4,6 +4,7 @@ import hashlib
 import importlib.metadata
 import shutil
 import sys
+import tomllib
 from pathlib import Path
 
 import PyInstaller.__main__
@@ -12,6 +13,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
+    reuse_spec = "--reuse-spec" in sys.argv and (ROOT / "spoTano.spec").is_file()
+    if reuse_spec:
+        PyInstaller.__main__.run([str(ROOT / "spoTano.spec"), "--noconfirm",
+                                  "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build")])
+    else:
+        build_fresh()
+    package()
+
+
+def build_fresh():
     PyInstaller.__main__.run(
         [
             str(ROOT / "launcher.py"),
@@ -43,10 +54,14 @@ def main():
             ],
         ]
     )
+
+
+def package():
     target = ROOT / "dist" / "spoTano"
     for name in ("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(ROOT / name, target / name)
-    shutil.copytree(ROOT / "docs", target / "docs", dirs_exist_ok=True)
+    shutil.copytree(ROOT / "docs", target / "docs", dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("analysis-*", "optimization-evidence"))
     licenses = target / "licenses"
     licenses.mkdir(exist_ok=True)
     python_license = Path(sys.base_prefix) / "LICENSE.txt"
@@ -74,9 +89,9 @@ def main():
                     output.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, output)
     (licenses / "versions.txt").write_text("\n".join(inventory), encoding="utf-8")
-    archive = Path(
-        shutil.make_archive(str(ROOT / "dist" / "spoTano-1.0.0-windows-x64"), "zip", ROOT / "dist", "spoTano")
-    )
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    archive = Path(shutil.make_archive(str(ROOT / "dist" / f"spoTano-{version}-windows-x64"),
+                                     "zip", ROOT / "dist", "spoTano"))
     with archive.open("rb") as stream:
         checksum = hashlib.file_digest(stream, "sha256").hexdigest()
     (ROOT / "dist" / "SHA256SUMS.txt").write_text(f"{checksum}  {archive.name}\n", encoding="ascii")
