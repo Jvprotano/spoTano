@@ -102,7 +102,7 @@ def test_export_schedules_reorganization_and_preview(app, monkeypatch, tmp_path)
     app.export()
     work, done = calls.pop()
     assert callable(done) and work() is marker
-    assert calls == ["reorganize", tmp_path]
+    assert calls == ["reorganize", str(tmp_path)]
 
 
 def test_removing_selected_playlist_also_clears_checkbox(app, monkeypatch):
