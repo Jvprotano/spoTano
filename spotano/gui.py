@@ -13,6 +13,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from . import __version__
+from .benchmark import PerformanceTest, result_lines, select_sample
 from .db import Store
 from .exporter import LAYOUTS, Exporter, output_folders, usb_drives
 from .genres import CATEGORIES
@@ -407,6 +408,22 @@ class App:
             text="2 por padrão; limite separado para reduzir disputa de CPU.",
             foreground="#63786c",
         ).pack(side="left", padx=8)
+        calibration = ttk.Frame(performance)
+        calibration.pack(fill="x", pady=8)
+        ttk.Label(calibration, text="Amostra do teste (músicas):").pack(side="left", padx=(0, 8))
+        self.performance_sample = ttk.Combobox(calibration, values=["4", "8"], state="readonly", width=4)
+        self.performance_sample.set("4")
+        self.performance_sample.pack(side="left")
+        self.controls.append(self.performance_sample)
+        self.button(calibration, "Testar desempenho…", self.test_performance).pack(side="left", padx=8)
+        self.button(calibration, "Último resultado", self.last_performance).pack(side="left")
+        ttk.Label(
+            performance,
+            text="Marque playlists para comparar downloads e conversões com a mesma amostra. "
+            "O teste baixa áudios temporários e sugere valores; você decide se deseja aplicar.",
+            foreground="#63786c",
+            wraplength=900,
+        ).pack(anchor="w", pady=(0, 8))
         sources = section("Fontes de categorias · opcionais")
         ttk.Label(
             sources,
@@ -1022,6 +1039,80 @@ class App:
 
     def open_metrics(self):
         open_folder(getattr(self.library, "last_run", self.store.root / "runs"))
+
+    def test_performance(self):
+        if self.busy:
+            return
+        try:
+            tracks = select_sample(self.store, self.checked_playlists, int(self.performance_sample.get()))
+        except ValueError as exc:
+            messagebox.showinfo("Teste de desempenho", str(exc), parent=self.root)
+            return
+        self.review(
+            "Teste de desempenho",
+            f"Comparar paralelismo com {len(tracks)} músicas das playlists marcadas?",
+            [
+                "Compara 1 a 4 downloads e depois as conversões, em duas rodadas por configuração.",
+                f"Até 14 lotes / {14 * len(tracks)} downloads reais, com tráfego de internet e uso de CPU/disco.",
+                "Pode levar vários minutos. Acompanhe as etapas nos logs e use Cancelar quando precisar.",
+                "Usa as opções atuais de Categoria, Artistas e Metadados, com caches locais vazios.",
+                "Áudios temporários são removidos; biblioteca, fontes manuais e caches originais são preservados.",
+                "As configurações só mudam se você aplicar a sugestão ao final.",
+                "",
+                *[f"{track['artist']} — {track['name']}" for track in tracks],
+            ],
+            lambda: self.run(lambda: PerformanceTest(self.library).run(tracks), self.performance_result),
+            "Iniciar teste",
+        )
+
+    def last_performance(self):
+        path = self.store.setting("performance_report")
+        if not path or not Path(path).is_file():
+            messagebox.showinfo("Teste de desempenho", "Nenhum resultado salvo. Execute um teste primeiro.")
+            return
+        try:
+            self.performance_result(json.loads(Path(path).read_text(encoding="utf-8")))
+        except (OSError, ValueError, KeyError) as exc:
+            messagebox.showerror("Não foi possível abrir o resultado", str(exc), parent=self.root)
+
+    def performance_result(self, report):
+        best = report["recommendation"] if report["status"] == "completed" else None
+        if best:
+            summary = (
+                f"Sugestão: {best['download_workers']} downloads e {best['conversion_workers']} conversões. "
+                f"Média: {best['tracks_per_minute']:.1f} músicas/min nesta amostra."
+            )
+        else:
+            summary = "Teste sem sugestão aplicável. Confira as medições e falhas no relatório."
+        lines = result_lines(report)
+        if download_options(self.store) != report["options"]:
+            lines.insert(
+                0, "As opções de download mudaram desde o teste. Repita para medir as opções atuais."
+            )
+            best = None
+            summary = "Resultado anterior: opções diferentes das atuais."
+
+        def apply():
+            if not best:
+                open_folder(report["directory"])
+                return
+            with self.store.connect() as db:
+                for key in ("download_workers", "conversion_workers"):
+                    db.execute("INSERT OR REPLACE INTO settings VALUES(?,?)", (key, json.dumps(best[key])))
+                self.store.bump(db)
+            self.download_workers.set(str(best["download_workers"]))
+            self.conversion_workers.set(str(best["conversion_workers"]))
+            self.append_log(
+                f"Sugestão aplicada: {best['download_workers']} downloads / {best['conversion_workers']} conversões."
+            )
+
+        self.review(
+            "Resultado do teste de desempenho",
+            summary,
+            lines,
+            apply,
+            "Aplicar sugestão" if best else "Abrir relatório",
+        )
 
     def clear_matches(self):
         if messagebox.askyesno(

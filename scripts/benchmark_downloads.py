@@ -27,6 +27,9 @@ def main():
     parser.add_argument("--conversions", type=int, default=3, choices=range(1, 5))
     parser.add_argument("--exe", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--calibrate", action="store_true", help="Exercise the full isolated performance test"
+    )
     args = parser.parse_args()
     original_popen = subprocess.Popen
     processes = []
@@ -92,6 +95,29 @@ def main():
         lib.import_playlist("https://open.spotify.com/playlist/" + "P" * 22)
         began = time.monotonic()
         try:
+            if args.calibrate:
+                from spotano.benchmark import PerformanceTest
+
+                report = PerformanceTest(lib).run(tracks)
+                assert report["status"] == "completed" and report["recommendation"], report
+                assert all(row["downloaded"] == args.tracks and not row["failures"] for row in report["rows"])
+                assert not list((root / "data" / "benchmarks").glob("*/trial-*"))
+                assert not list(lib.music.rglob("*.mp3"))
+                assert all(not track["path"] for track in store.tracks())
+                assert store.setting("download_workers") == args.workers
+                assert store.setting("conversion_workers") == args.conversions
+                summary = {
+                    "calibration": "OK",
+                    "trials": len(report["rows"]),
+                    "downloads": sum(row["downloaded"] for row in report["rows"]),
+                    "recommendation": report["recommendation"],
+                    "kind": "real SDK/FFmpeg; generated audio; loopback; not YouTube throughput",
+                }
+                if args.output:
+                    args.output.parent.mkdir(parents=True, exist_ok=True)
+                    args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")
+                print(json.dumps(summary, indent=2), flush=True)
+                return
             with patch("spotano.downloads.subprocess.Popen", launch):
                 result = lib.apply(lib.preview(force=True))
             assert result["downloaded"] == args.tracks and not result["failures"], result

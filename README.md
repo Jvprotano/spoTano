@@ -51,6 +51,25 @@ avaliado com o próprio provedor; mais conversões podem disputar CPU. A saída
 continua MP3 CBR 192 kbps / 44,1 kHz / estéreo, com ID3v2.3 e gênero quando os metadados estão habilitados.
 Correções de categoria atualizam tags, hash e exportação sem baixar novamente.
 
+Em **Configurações → Testar desempenho…**, compare o paralelismo no seu computador.
+Marque playlists e escolha uma amostra de 4 ou 8 músicas. O teste compara de 1 a 4
+downloads e depois ajusta as conversões no melhor nível encontrado, em duas rodadas
+por configuração com ordem inversa. Usa o fluxo real com as opções atuais e caches
+locais vazios, em um catálogo temporário na mesma unidade. Preserva fontes manuais,
+correções e a biblioteca original. Pode executar até 14 lotes (56 ou 112 downloads),
+consumindo internet, CPU e espaço temporário; permite cancelar pelos controles habituais.
+
+O resultado mostra tempos e falhas por configuração e sugere os dois campos somente
+quando as duas rodadas terminam sem falhas. Dentro de 5% do menor tempo, prefere menos
+processos. **Aplicar sugestão** salva os valores; nada muda automaticamente.
+É a melhor configuração entre as testadas para essa amostra e condições do provedor,
+sem garantia de ótimo global ou do tempo para uma playlist inteira. **Último resultado**
+reabre o relatório; medições e métricas por fase ficam em `benchmarks/<id>/` na pasta
+de dados, inclusive medições parciais de testes cancelados. Ao mudar as opções de
+download, repita o teste. Os MP3s e catálogos temporários são removidos ao final de cada lote.
+Os tempos incluem a preparação dos processos, que pesa mais em amostras pequenas;
+para coleções maiores, prefira a amostra de 8 músicas.
+
 A troca de caminho ou de conteúdo deixa uma transição recuperável no catálogo.
 Depois de validar o novo MP3, versões anteriores conhecidas vão para a lixeira;
 uma interrupção é reconciliada na próxima abertura. **Revisar cópias antigas**

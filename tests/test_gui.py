@@ -62,6 +62,33 @@ def test_checkbox_selection_controls_actions_and_survives_refresh(app):
     assert str(app.force_button["state"]) == "disabled"
 
 
+def test_performance_suggestion_only_changes_both_fields_when_applied(app, monkeypatch):
+    from spotano.options import download_options
+
+    captured = {}
+    monkeypatch.setattr(
+        app,
+        "review",
+        lambda title, summary, lines, action, confirm: captured.update(action=action, confirm=confirm),
+    )
+    before = app.store.setting("download_workers")
+    app.performance_result(
+        {
+            "status": "completed",
+            "created_at": "2026-10-27",
+            "options": download_options(app.store),
+            "rows": [],
+            "directory": str(app.store.root),
+            "recommendation": {"download_workers": 3, "conversion_workers": 1, "tracks_per_minute": 4},
+        }
+    )
+    assert captured["confirm"] == "Aplicar sugestão"
+    assert app.store.setting("download_workers") == before
+    captured["action"]()
+    assert app.store.setting("download_workers") == 3 and app.download_workers.get() == "3"
+    assert app.store.setting("conversion_workers") == 1 and app.conversion_workers.get() == "1"
+
+
 def test_selected_sync_preview_and_logs_cross_thread_queue(app):
     captured = []
     app.review = lambda *args: captured.append(args)
