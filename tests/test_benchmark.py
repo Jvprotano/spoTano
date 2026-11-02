@@ -241,6 +241,7 @@ def test_trial_copies_workload_and_manual_choices_but_keeps_original_catalog_unt
     store = Store(tmp_path / "original")
     store.set_setting("musicbrainz", False)
     store.set_setting("lastfm_api_key", "private-test-value")
+    store.set_setting("conversion_encoder", "lame")
     store.set_setting("download_options", {"metadata": True})
     store.set_setting("output_layout", "unified")
     lib = Library(store, object())
@@ -264,6 +265,7 @@ def test_trial_copies_workload_and_manual_choices_but_keeps_original_catalog_unt
             "metadata": True,
         }
         assert isolated.store.setting("output_layout") == "unified"
+        assert isolated.store.setting("conversion_encoder") == "lame"
         assert isolated.store.setting("lastfm_api_key") == "private-test-value"
         assert isolated.store.setting("download_workers") == 4
         assert isolated.store.setting("conversion_workers") == 1

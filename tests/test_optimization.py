@@ -72,7 +72,7 @@ def test_confident_first_page_never_extracts_views_or_calls_second_provider():
     "candidate",
     [
         result(name="Song (Cover)"),
-        result(name="Song - Live"),
+        result(name="Song - Live", duration=190),
         result(name="Song Remix"),
         result(name="Song (Slowed + Reverb)"),
         result(artist="Someone Else"),

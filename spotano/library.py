@@ -318,7 +318,8 @@ class Library:
         self.progress(f"Execução {run.run_id} · métricas e diagnóstico em {run.directory}")
         if hasattr(self.provider, "download_settings"):
             self.provider.download_settings = {
-                "conversion_workers": self.store.setting("conversion_workers", 2)
+                "conversion_workers": self.store.setting("conversion_workers", 2),
+                "conversion_encoder": self.store.setting("conversion_encoder", "windows"),
             }
         try:
             result = self._apply(plan, run)

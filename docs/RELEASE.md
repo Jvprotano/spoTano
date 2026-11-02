@@ -1,3 +1,11 @@
+spoTano 2.4.0: conversão rápida pelo Windows com fallback automático para LAME,
+seletor em Configurações e recuperação das três correspondências pendentes.
+
+Ganho local medido: 38,7% no tempo de conversão, incluindo reconstrução do cabeçalho
+MP3 e validação. Mesmos 192 kbps / 44,1 kHz / estéreo; algoritmos diferentes.
+[Análise e validação](RELEASE-2.4.0-VALIDATION.md).
+Pacote: `dist/spoTano-2.4.0-windows-x64.zip`.
+
 spoTano 2.3.1 corrige a identificação de participações entre colchetes, evita reavaliar candidatos idênticos e limpa diagnósticos entre faixas.
 
 Pacote: `dist/spoTano-2.3.1-windows-x64.zip`. Consulte [análise e validação](RELEASE-2.3.1-VALIDATION.md).

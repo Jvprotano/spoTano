@@ -1,5 +1,6 @@
 """Exercise a warm worker with two own WAV samples served only on loopback."""
 
+import argparse
 import functools
 import http.server
 import subprocess
@@ -19,7 +20,12 @@ from spotano.downloads import WarmDownload
 
 
 def main():
-    exe = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else None
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("exe", nargs="?", type=Path)
+    parser.add_argument("--seconds", type=int, default=1)
+    parser.add_argument("--require-native", action="store_true")
+    args = parser.parse_args()
+    exe = args.exe.resolve() if args.exe else None
     launches, events = [], []
     original = subprocess.Popen
 
@@ -43,7 +49,7 @@ def main():
             audio.setnchannels(1)
             audio.setsampwidth(2)
             audio.setframerate(22050)
-            audio.writeframes(b"\x00\x00" * 22050)
+            audio.writeframes(b"\x00\x00" * 22050 * args.seconds)
         server = http.server.ThreadingHTTPServer(
             ("127.0.0.1", 0), functools.partial(Handler, directory=directory)
         )
@@ -55,20 +61,26 @@ def main():
             with patch("spotano.downloads.subprocess.Popen", launch):
                 for letter in "AB":
                     target = root / f"{letter}.mp3"
-                    session.download(
+                    evidence = session.download(
                         {
                             "name": "Own generated sample " + letter,
                             "artist": "spoTano tests",
                             "song_id": letter * 22,
                             "album_id": None,
                             "genres": [],
-                            "duration": 1,
+                            "duration": args.seconds,
                             "download_url": f"http://127.0.0.1:{server.server_port}/own-generated.wav",
                         },
                         target,
                         timeout=120,
                     )
                     audio = MP3(target).info
+                    if args.require_native:
+                        from spotano.audio import validate_duration, validate_mp3
+
+                        validate_mp3(target)
+                        validate_duration(audio.length, args.seconds)
+                        assert evidence["metrics"]["encoder"] == "mp3_mf", evidence
                     assert audio.sample_rate == 44100 and audio.channels == 2 and audio.length > 0
                     assert not MP3(target).tags or not MP3(target).tags.getall("APIC")
                 assert len(launches) == 1, "Each song must reuse the same process"

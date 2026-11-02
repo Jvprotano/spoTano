@@ -346,6 +346,11 @@ class DownloadEngine:
                     session = provider.client._session
                     session.request = partial(session.request, timeout=10)
             self.original_convert = sdk_downloader.async_convert
+            from .conversion import MP3Converter
+
+            self.converter = MP3Converter(
+                self.original_convert, progress, self.settings.get("conversion_encoder", "windows")
+            )
             # The SDK creates a fresh YoutubeDL for every song, losing HTTP connections
             # and initialized extractors. Each worker handles one song at a time.
             self.original_audio_provider = sdk_downloader.AudioProvider
@@ -373,7 +378,9 @@ class DownloadEngine:
                     self.metrics["queue_wait_s"] = round(waited, 3)
                     self.progress("Convertendo com FFmpeg para MP3 · 0%")
                     self.phase("Converting")
-                    return await self.original_convert(*args, **kwargs)
+                    result = await self.converter(*args, **kwargs)
+                    self.metrics.update(self.converter.metrics)
+                    return result
 
             sdk_downloader.async_convert = limited_convert
         except BaseException:
@@ -427,6 +434,8 @@ class DownloadEngine:
             tried.add(candidate["url"])
             match = candidate
             self.active_match = candidate
+            for note in candidate.get("evidence_notes", []):
+                self.progress("Evidência de correspondência · " + note)
             song.download_url = candidate["url"]
             self.downloader.errors.clear()
             self.provider_error = ""

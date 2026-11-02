@@ -900,10 +900,19 @@ class App(DesktopViews):
             return
         metadata = json.loads(self.track_rows[selection[0]]["metadata"])
         outer = self.library.provider
+        encoder = self.store.setting("conversion_encoder", "windows")
 
         class LocalProvider:
             def download(self, metadata, output):
-                return outer.call("local", {"source": source, "output": str(output), "metadata": metadata})
+                return outer.call(
+                    "local",
+                    {
+                        "source": source,
+                        "output": str(output),
+                        "metadata": metadata,
+                        "conversion_encoder": encoder,
+                    },
+                )
 
         lib = Library(self.store, LocalProvider(), self.report, self.cancel)
         plan = SyncPlan(self.store.setting("revision"), [], downloads=[metadata])

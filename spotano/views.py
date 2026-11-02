@@ -673,6 +673,35 @@ class DesktopViews:
         self.refresh_option_labels()
 
     def build_performance_settings(self, parent):
+        from .conversion import ENCODERS
+
+        section = ui.section(
+            parent,
+            "Conversão MP3",
+            "Rápida usa o encoder do Windows; Tradicional mantém o LAME. "
+            "Ambos geram MP3 192 kbps, 44,1 kHz e estéreo, com codificação de áudio diferente.",
+        )
+        self.conversion_encoder = ttk.Combobox(
+            section, values=list(ENCODERS.values()), state="readonly", width=30
+        )
+        self.conversion_encoder.set(
+            ENCODERS.get(self.store.setting("conversion_encoder", "windows"), ENCODERS["windows"])
+        )
+        self.conversion_encoder.pack(anchor="w", pady=6)
+        self.conversion_encoder.bind(
+            "<<ComboboxSelected>>",
+            lambda _: self.store.set_setting(
+                "conversion_encoder",
+                next(key for key, value in ENCODERS.items() if value == self.conversion_encoder.get()),
+            ),
+        )
+        self.controls.append(self.conversion_encoder)
+        ttk.Label(
+            section,
+            text="Se a conversão rápida falhar, o LAME assume automaticamente. Vale para os próximos downloads.",
+            style="Muted.TLabel",
+            wraplength=670,
+        ).pack(anchor="w")
         section = ui.section(
             parent, "Paralelismo", "Ajuste quantas músicas podem baixar e converter ao mesmo tempo."
         )

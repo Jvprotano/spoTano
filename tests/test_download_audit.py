@@ -96,7 +96,7 @@ def test_alternate_translated_title_and_full_collaborator_prefix():
         rank_candidate(metadata(name="Tentação (Nopelo360) - Ao Vivo"), result(name="Tentação (Ao Vivo)"))
         is None
     )
-    assert rank_candidate(metadata(name="Deslumbrante"), result(name="Deslumbrante (Ao Vivo)")) is None
+    assert rank_candidate(metadata(name="Deslumbrante (Studio)"), result(name="Deslumbrante (Ao Vivo)")) is None
     assert rank_candidate(metadata(name="Song (Extended Version)"), result(name="Song")) is None
 
 

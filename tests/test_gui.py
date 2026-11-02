@@ -760,3 +760,14 @@ def test_settings_scroll_reaches_actions_at_minimum_size(app):
         w for w in app.controls if isinstance(w, ttk.Button) and w.cget("text") == "Ajuda e atualizações ↗"
     )
     assert help_button.winfo_rooty() + help_button.winfo_height() < app.log_text.winfo_rooty()
+
+
+def test_conversion_encoder_choice_is_persisted(app):
+    app.conversion_encoder.set("Tradicional · LAME")
+    app.conversion_encoder.event_generate("<<ComboboxSelected>>")
+    app.root.update()
+    assert app.store.setting("conversion_encoder") == "lame"
+    app.conversion_encoder.set("Rápida · Windows")
+    app.conversion_encoder.event_generate("<<ComboboxSelected>>")
+    app.root.update()
+    assert app.store.setting("conversion_encoder") == "windows"

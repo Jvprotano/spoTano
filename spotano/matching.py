@@ -60,7 +60,7 @@ def editions(title):
 
 
 def clean_title(title):
-    title = re.sub(r"\s[-–]\s(?:ao vivo|live|from)\b.*$", "", title, flags=re.I)
+    title = re.sub(r"\s[-–|]\s(?:dvd\s+)?(?:ao vivo|live|from)\b.*$", "", title, flags=re.I)
     title = re.sub(r"\((?:feat|ft|with|com)\b[^)]*\)|\[(?:feat|ft|with|com)\b[^]]*\]", "", title, flags=re.I)
     title = re.sub(r"\((?:ao vivo|live|acústico|acustico|acoustic)\b[^)]*\)", "", title, flags=re.I)
     text = words(title)
@@ -127,17 +127,20 @@ def rank_candidate(metadata, result, *, rejected=None):
 
     wanted = editions(metadata["name"] + " " + (metadata.get("album_name") or ""))
     found = editions(result.name + " " + (result.album or ""))
-    if (found - wanted) & {"cover", "speed", "remix", "acoustic", "live"}:
+    inferred_live = "live" in found and "live" not in wanted
+    if (found - wanted) & {"cover", "speed", "remix", "acoustic"}:
         return decline("Edição diferente: cover, velocidade, remix, acústico ou ao vivo não solicitado")
     if wanted & {"live", "acoustic", "remix"} - found:
         return decline("Edição solicitada não identificada no candidato")
     if ("remaster" in wanted) != ("remaster" in found):
         return decline("Remasterização diferente da solicitada")
     years = set(re.findall(r"\b(?:19|20)\d{2}\b", metadata["name"]))
+    missing_year = False
     if years and wanted & {"live", "remaster"}:
         candidate_years = set(re.findall(r"\b(?:19|20)\d{2}\b", result.name + " " + (result.album or "")))
-        if not years.intersection(candidate_years):
+        if candidate_years and not years.intersection(candidate_years):
             return decline("Ano da gravação ausente ou diferente do solicitado")
+        missing_year = not candidate_years
     target_duration = float(metadata.get("duration") or 0)
     candidate_duration = float(result.duration or 0)
     delta = abs(target_duration - candidate_duration) if target_duration and candidate_duration else None
@@ -161,16 +164,71 @@ def rank_candidate(metadata, result, *, rejected=None):
         credited_prefix = artist_words(parts[0])
         credits = [artist_words(name) for name in metadata.get("artists", [metadata["artist"]])]
         combined = " ".join(credits)
-        if credited_prefix == combined:
+        if credited_prefix in {combined, artist}:
             title = clean_title(parts[1])
             artist_score = max(artist_score, 95)
+    # Video titles preserve edition and contributor information that Music search
+    # can omit for the very same video ID. Remove a guest suffix only when its
+    # credits agree with the requested contributors.
+    guests = [artist_words(name) for name in (metadata.get("artists") or [])[1:]]
+    guest_suffix = re.search(r"\s+(?:part\.?|feat\.?|ft\.?)\s+(.+)$", title, re.I)
+    if guest_suffix and artist_words(guest_suffix[1]) in guests:
+        title = title[: guest_suffix.start()]
+    target_name = metadata["name"]
+    for event in re.findall(r"\(([^()]*\d[^()]*)\)", target_name):
+        if editions(event):
+            continue
+        compact_event = words(event).replace(" ", "")
+        candidate_context = words(result.name + " " + (result.album or "")).replace(" ", "")
+        if compact_event not in candidate_context:
+            return decline("Projeto/edição solicitado não identificado no candidato")
+        target_name = target_name.replace("(" + event + ")", "")
     title_score = max(
         similarity(left, right)
-        for left in title_variants(metadata["name"])
+        for left in title_variants(target_name)
         for right in {title, *title_variants(result.name)}
     )
     if artist_score < 78 or title_score < 78:
         return decline(f"Identidade insuficiente: artista {artist_score:.0f}%, título {title_score:.0f}%")
+    evidence_notes = []
+    if inferred_live:
+        # An unlabelled Spotify single is not an explicit studio recording.
+        # Accept this inference only for near-exact identity/duration and a
+        # catalogue recording or verified channel, never an arbitrary upload.
+        explicit_studio = re.search(
+            r"\b(?:studio|estudio)\b", words(metadata["name"] + " " + (metadata.get("album_name") or ""))
+        )
+        if (
+            explicit_studio
+            or not result.verified
+            or delta is None
+            or delta > max(3, target_duration * 0.02)
+            or artist_score < 98
+            or title_score < 98
+        ):
+            return decline("Edição ao vivo não confirmada pelos metadados incompletos do pedido")
+        evidence_notes.append("Ao vivo inferido: fonte verificada, identidade e duração próximas")
+    if missing_year:
+        context = re.split(r"\b(?:live|ao vivo)\b", words(metadata["name"]), maxsplit=1)[-1]
+        venue = [
+            w
+            for w in context.split()
+            if w not in {"in", "at", "em", "no", "na", "de", "do", "da", "dvd"}
+            and not re.fullmatch(r"(?:19|20)\d{2}", w)
+        ]
+        candidate_context = words(result.name + " " + (result.album or ""))
+        if (
+            "live" not in wanted
+            or not venue
+            or not all(w in candidate_context.split() for w in venue)
+            or not result.verified
+            or delta is None
+            or delta > max(3, target_duration * 0.02)
+            or artist_score < 98
+            or title_score < 98
+        ):
+            return decline("Ano ausente e evidência insuficiente do local da gravação")
+        evidence_notes.append("Ano ausente: local da gravação, fonte, identidade e duração compatíveis")
     duration_score = max(0, 100 - (delta or 0) * 3) if delta is not None else 55
     score = title_score * 0.50 + artist_score * 0.35 + duration_score * 0.15
     if score < 85:
@@ -193,6 +251,7 @@ def rank_candidate(metadata, result, *, rejected=None):
         "verified": bool(result.verified),
         "source": result.source,
         "version": MATCH_VERSION,
+        "evidence_notes": evidence_notes,
     }
 
 
@@ -226,11 +285,19 @@ class FastMatcher:
             # Expanded pages repeat results. Skip only identical metadata: another
             # provider can supply the album/edition missing from the first result.
             identity = (
-                result.url, result.name, result.author, tuple(result.artists or ()),
-                result.album, result.duration, result.verified, result.source,
+                result.url,
+                result.name,
+                result.author,
+                tuple(result.artists or ()),
+                result.album,
+                result.duration,
+                result.verified,
+                result.source,
             )
             if identity in evaluated:
-                self.stats["duplicate_candidates_skipped"] = self.stats.get("duplicate_candidates_skipped", 0) + 1
+                self.stats["duplicate_candidates_skipped"] = (
+                    self.stats.get("duplicate_candidates_skipped", 0) + 1
+                )
                 return
             evaluated.add(identity)
             rejection = {}
@@ -290,9 +357,16 @@ class FastMatcher:
             compact += " ao vivo"
         if "acoustic" in markers:
             compact += " acoustic"
-        searches = [(query, 10), (query, 30)]
+        searches = [(query, 10)]
         if words(compact) != words(query):
             searches.append((compact, 10))
+        # Collaborators and spaced project labels improve recall in normal
+        # YouTube search without issuing extra requests for successful matches.
+        contextual = " ".join(metadata.get("artists") or [metadata["artist"]]) + " " + metadata["name"]
+        contextual = re.sub(r"(?<=[a-zA-Z])(?=\d)", " ", contextual)
+        if words(contextual) not in {words(q) for q, _ in searches}:
+            searches.append((contextual, 10))
+        searches.append((query, 30))
         for query, size in searches:
             for provider in self.providers:
                 if time.monotonic() - started > 55:
@@ -362,7 +436,7 @@ class FastMatcher:
             Result(
                 source="YouTube",
                 url="https://www.youtube.com/watch?v=" + entry["id"],
-                verified=False,
+                verified=bool(entry.get("channel_is_verified")),
                 name=entry.get("title", ""),
                 duration=entry.get("duration") or 0,
                 author=entry.get("channel") or entry.get("uploader") or "",

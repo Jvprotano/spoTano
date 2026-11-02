@@ -132,7 +132,11 @@ class SpotProvider:
     def download(self, metadata, output):
         if self._batch is not None:
             return self._batch.download(metadata, output)
-        return self.call("download", {"metadata": metadata, "output": str(output)}, timeout=480)
+        return self.call(
+            "download",
+            {"metadata": metadata, "output": str(output), "settings": self.download_settings},
+            timeout=480,
+        )
 
     @contextmanager
     def download_batch(self):
@@ -294,39 +298,29 @@ def _worker(request: Path, result: Path):
                 ffmpeg = get_ffmpeg_path()
             if not ffmpeg:
                 raise ValueError("Prepare os componentes de download nas Configurações.")
-            options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+            import asyncio
+
+            from .conversion import PROFILE_ARGS, MP3Converter, local_convert
+
             progress("FFmpeg · convertendo áudio local para MP3 192 kbps / 44,1 kHz / estéreo…")
-            subprocess.run(
-                [
-                    str(ffmpeg),
-                    "-y",
-                    "-i",
-                    payload["source"],
-                    "-vn",
-                    "-map_metadata",
-                    "-1",
-                    "-codec:a",
-                    "libmp3lame",
-                    "-b:a",
-                    "192k",
-                    "-ar",
-                    "44100",
-                    "-ac",
-                    "2",
-                    "-id3v2_version",
-                    "3",
-                    payload["output"],
-                ],
-                check=True,
-                capture_output=True,
-                timeout=240,
-                **options,
+            converter = MP3Converter(local_convert, progress, payload.get("conversion_encoder", "windows"))
+            success, error = asyncio.run(
+                converter(
+                    input_file=Path(payload["source"]),
+                    output_file=Path(payload["output"]),
+                    ffmpeg=ffmpeg,
+                    output_format="mp3",
+                    bitrate="192k",
+                    ffmpeg_args=PROFILE_ARGS,
+                )
             )
+            if not success:
+                raise RuntimeError(error.get("error", "Falha na conversão local"))
             answer = payload["output"]
         elif action in {"download", "candidates"}:
             from .downloads import DownloadEngine
 
-            engine = DownloadEngine(request.parent, progress)
+            engine = DownloadEngine(request.parent, progress, payload.get("settings"))
             try:
                 if action == "candidates":
                     from .matching import MatchError

@@ -74,6 +74,7 @@ def test_settings(store):
         "musicbrainz": store.setting("musicbrainz", True),
         "lastfm_api_key": store.setting("lastfm_api_key", ""),
         "output_layout": store.setting("output_layout", "playlists"),
+        "conversion_encoder": store.setting("conversion_encoder", "windows"),
     }
 
 
@@ -84,6 +85,7 @@ def settings_match(store, report):
         "musicbrainz": settings["musicbrainz"],
         "lastfm_enabled": bool(settings["lastfm_api_key"] or os.environ.get("LASTFM_API_KEY")),
         "output_layout": settings["output_layout"],
+        "conversion_encoder": settings["conversion_encoder"],
     }
     return report.get("options") == settings["download_options"] and report.get("workload") == workload
 
@@ -307,6 +309,7 @@ class PerformanceTest:
                 "musicbrainz": self.settings["musicbrainz"],
                 "lastfm_enabled": bool(self.settings["lastfm_api_key"] or os.environ.get("LASTFM_API_KEY")),
                 "output_layout": self.settings["output_layout"],
+                "conversion_encoder": self.settings["conversion_encoder"],
             },
             "platform": platform.platform(),
             "logical_cpus": os.cpu_count(),
