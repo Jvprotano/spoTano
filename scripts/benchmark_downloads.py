@@ -27,10 +27,11 @@ def main():
     parser.add_argument("--conversions", type=int, default=3, choices=range(1, 5))
     parser.add_argument("--exe", type=Path)
     parser.add_argument("--output", type=Path)
-    parser.add_argument(
-        "--calibrate", action="store_true", help="Exercise the full isolated performance test"
-    )
+    parser.add_argument("--calibrate", action="store_true", help="Exercise the isolated performance test")
+    parser.add_argument("--calibration-mode", choices=("quick", "complete"), default="quick")
     args = parser.parse_args()
+    if args.calibrate and args.calibration_mode == "quick":
+        args.tracks = 4
     original_popen = subprocess.Popen
     processes = []
     peak = 0
@@ -96,21 +97,31 @@ def main():
         began = time.monotonic()
         try:
             if args.calibrate:
-                from spotano.benchmark import PerformanceTest
+                from spotano.benchmark import (
+                    PerformanceTest,
+                    report_recommendation,
+                )
 
-                report = PerformanceTest(lib).run(tracks)
-                assert report["status"] == "completed" and report["recommendation"], report
+                with patch("spotano.downloads.subprocess.Popen", launch):
+                    report = PerformanceTest(lib).run(tracks, mode=args.calibration_mode)
+                assert report["status"] == "completed", report
+                assert len(report["rows"]) == len(report["configurations"]) * report["repetitions"]
+                assert report["recommendation"] == report_recommendation(report)
                 assert all(row["downloaded"] == args.tracks and not row["failures"] for row in report["rows"])
                 assert not list((root / "data" / "benchmarks").glob("*/trial-*"))
                 assert not list(lib.music.rglob("*.mp3"))
                 assert all(not track["path"] for track in store.tracks())
                 assert store.setting("download_workers") == args.workers
                 assert store.setting("conversion_workers") == args.conversions
+                assert all(process.poll() is not None for process in processes)
                 summary = {
                     "calibration": "OK",
+                    "mode": args.calibration_mode,
                     "trials": len(report["rows"]),
                     "downloads": sum(row["downloaded"] for row in report["rows"]),
                     "recommendation": report["recommendation"],
+                    "ranked_configurations": len(report["ranking"]),
+                    "unstable_configurations": sum(not r["stable"] for r in report["ranking"]),
                     "kind": "real SDK/FFmpeg; generated audio; loopback; not YouTube throughput",
                 }
                 if args.output:

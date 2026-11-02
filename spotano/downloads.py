@@ -175,7 +175,9 @@ class WarmDownload:
                         "O provedor excedeu o tempo limite; o mecanismo será reiniciado na próxima faixa."
                     )
                 phase_limits = {
-                    "prepare": 60,
+                    # A cold SDK import can exceed one minute on a busy Windows
+                    # machine; keep the overall deadline and stage diagnostics.
+                    "prepare": 120 if fresh else 60,
                     "search": 90,
                     "extraction": 90,
                     "transfer": 120,
@@ -206,23 +208,41 @@ class WarmDownload:
             self.drain(label)
             data = json.loads(response.read_text(encoding="utf-8"))
             response.unlink()
-        except BaseException:
-            self.stop()
+        except BaseException as exc:
+            if isinstance(exc, Exception) and not hasattr(exc, "diagnostic"):
+                exc.diagnostic = {
+                    "stage": self.phase,
+                    "metrics": {"total_s": round(time.monotonic() - started, 3)},
+                    "worker_log_tail": self.log_tail(),
+                }
+            warning = self.stop()
+            if warning and hasattr(exc, "diagnostic"):
+                exc.diagnostic["shutdown_warning"] = warning
             raise
         if "error" in data:
             raise ProviderError(data["error"], data.get("diagnostic"))
         return data["result"]
 
+    def log_tail(self):
+        path = self.root / "worker.log"
+        if not path.exists():
+            return ""
+        with path.open("rb") as stream:
+            stream.seek(max(0, stream.seek(0, 2) - 3000))
+            return safe_error(RuntimeError(stream.read().decode("utf-8", errors="replace")))
+
     def stop(self):
+        warning = ""
         if self.process is not None:
             if self.process.poll() is None:
-                stop_tree(self.process)
+                warning = stop_tree(self.process)
             self.process = None
         for stream in (self.log, self.events):
             if stream is not None:
                 stream.close()
         self.log = self.events = None
         (self.root / "inbox.json").unlink(missing_ok=True)
+        return warning
 
     def close(self):
         try:
@@ -305,7 +325,7 @@ class DownloadEngine:
                     "format": "mp3",
                     "bitrate": "192k",
                     "ffmpeg": str(ffmpeg),
-                    "ffmpeg_args": "-map_metadata -1 -ar 44100 -ac 2 -id3v2_version 3",
+                    "ffmpeg_args": "-vn -loglevel info -map_metadata -1 -ar 44100 -ac 2 -id3v2_version 3",
                     "threads": 1,
                     "lyrics_providers": [],
                     "audio_providers": ["youtube-music", "youtube"],
@@ -477,6 +497,8 @@ class DownloadEngine:
                 "metrics": metrics,
                 "match": getattr(self, "active_match", None),
                 "candidates": self.matcher.last_candidates,
+                "rejected_candidates": getattr(self.matcher, "rejected_candidates", []),
+                "query_errors": getattr(self.matcher, "query_errors", []),
             }
         )
 

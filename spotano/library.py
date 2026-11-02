@@ -292,8 +292,9 @@ class Library:
         }
         return [t for t in self.orphan_preview() if t["id"] in candidates - protected]
 
-    def relative_path(self, track_id, metadata, category):
-        options = download_options(self.store)
+    def relative_path(self, track_id, metadata, category, options=None):
+        if options is None:
+            options = download_options(self.store)
         folders = []
         if options["categories"]:
             folders.append(safe_name(category))
@@ -305,7 +306,14 @@ class Library:
 
     def apply(self, plan):
         workers = max(1, min(4, int(self.store.setting("download_workers", 2))))
-        run = RunMetrics(self.store, len(plan.downloads), plan.retained, workers)
+        run = RunMetrics(
+            self.store,
+            len(plan.downloads),
+            plan.retained,
+            workers,
+            requested=plan.downloads,
+            playlists=plan.snapshots,
+        )
         self.last_run = run.directory
         self.progress(f"Execução {run.run_id} · métricas e diagnóstico em {run.directory}")
         if hasattr(self.provider, "download_settings"):
@@ -316,6 +324,7 @@ class Library:
             result = self._apply(plan, run)
             run.finish("completed_with_errors" if result["failures"] else "completed", **result)
             result["run_directory"] = str(run.directory)
+            self.progress(f"Relatório salvo: {run.directory / 'report.txt'} · pendências em failures.csv")
             return result
         except BaseException as exc:
             run.finish("cancelled" if isinstance(exc, Cancelled) else "failed", error=str(exc))
@@ -433,7 +442,7 @@ class Library:
                 info = self.validator(output)
                 if self.validator is validate_mp3:
                     validate_duration(info.length, metadata.get("duration"))
-                relative = self.relative_path(track_id, metadata, category)
+                relative = self.relative_path(track_id, metadata, category, options)
                 from .matching import fingerprint
 
                 match = evidence.get("match") if isinstance(evidence, dict) else None
@@ -459,6 +468,13 @@ class Library:
                 self.progress(f"Salvo · {label} · {relative}")
                 self.progress(f"Tempo total da faixa · {label} · {time.monotonic() - started:.1f}s")
             except Cancelled:
+                run.record(
+                    "track_finished",
+                    track_id=track_id,
+                    status="cancelled",
+                    error="Operação cancelada; use Baixar / retomar.",
+                    seconds=round(time.monotonic() - started, 3),
+                )
                 raise
             except Exception as exc:
                 message = sanitize(str(exc))
@@ -513,7 +529,8 @@ class Library:
                 completed += 1
                 report_batch()
                 self.progress(
-                    f"Progresso do lote: {completed}/{total} faixas finalizadas; {len(failures)} falhas."
+                    f"Progresso do lote: {completed}/{total} faixas processadas; "
+                    f"{completed - len(failures)} baixadas; {len(failures)} falhas."
                 )
                 self.check_cancel()
                 item = next(iterator, None)
@@ -606,7 +623,7 @@ class Library:
             if options["categories"] and not classified and not track["override"]:
                 category = resolver.resolve(metadata)
                 classified = True
-            relative = self.relative_path(track["id"], metadata, category)
+            relative = self.relative_path(track["id"], metadata, category, options)
             source, target = inside(self.music, track["path"]), inside(self.music, relative)
             if not source.is_file():
                 continue
@@ -644,6 +661,24 @@ class Library:
                 )
             finally:
                 shutil.rmtree(staging)
+
+    def correct_categories(self, track_ids, category, *, artists=False):
+        """Apply the existing correction rules to an explicit snapshot of checked tracks."""
+        if category and category not in {*CATEGORIES, "Outros"}:
+            raise ValueError("Categoria inválida.")
+        seen = set()
+        for track_id in dict.fromkeys(track_ids):
+            self.check_cancel()
+            if artists:
+                row = self.store.rows("SELECT metadata FROM tracks WHERE id=?", (track_id,))[0]
+                key = GenreResolver(self.store).artist_identity(json.loads(row["metadata"]))
+                if key in seen:
+                    continue
+                seen.add(key)
+                self.correct_artist(track_id, category)
+            else:
+                self.correct_genre(track_id, category)
+        self.progress("Ajustes das músicas marcadas concluídos.")
 
     def correct_genre(self, track_id, category):
         if category and category not in {*CATEGORIES, "Outros"}:

@@ -48,6 +48,9 @@ def main():
     import tkinter as tk
     from tkinter import messagebox
 
+    from .branding import set_app_id
+
+    set_app_id()
     root = tk.Tk()
     root.withdraw()
     try:

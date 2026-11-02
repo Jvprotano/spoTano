@@ -39,6 +39,41 @@ def test_artist_correction_before_download_and_future_tracks_respects_individual
     assert next(row for row in store.tracks() if row["id"] == future["song_id"])["path"].startswith("Pop/")
 
 
+def test_bulk_correction_only_changes_marked_files_and_restores_automatic(tmp_path):
+    store, provider, lib = collection(tmp_path)
+    lib.apply(lib.preview(saved=True))
+    before = {row["id"]: row for row in store.tracks()}
+    provider.downloads.clear()
+    lib.correct_categories([A, B, A], "Pop")
+    after = {row["id"]: row for row in store.tracks()}
+    assert after[C] == before[C]
+    assert all(after[i]["override"] == "Pop" and after[i]["path"].startswith("Pop/") for i in (A, B))
+    lib.correct_categories([A, B], "")
+    assert all(not row["override"] for row in store.tracks())
+    assert provider.downloads == []
+    assert len(list(lib.music.rglob("*.mp3"))) == 3
+
+
+def test_bulk_artists_deduplicates_identity_and_preserves_track_override(tmp_path, monkeypatch):
+    store, provider, lib = collection(tmp_path)
+    lib.correct_genre(A, "Rock e Metal")
+    calls = []
+    original = lib.correct_artist
+
+    def record(track_id, category):
+        calls.append(track_id)
+        original(track_id, category)
+
+    monkeypatch.setattr(lib, "correct_artist", record)
+    lib.correct_categories([A, B], "Pop", artists=True)
+    rows = {row["id"]: row for row in store.tracks()}
+    assert calls == [A]
+    assert rows[A]["override"] == "Rock e Metal"
+    assert rows[B]["category"] == "Pop"
+    assert rows[C]["classified"] == 0
+    assert not provider.downloads
+
+
 def test_correction_moves_existing_files_and_tags_immediately_without_downloading(tmp_path):
     from mutagen.id3 import ID3
 

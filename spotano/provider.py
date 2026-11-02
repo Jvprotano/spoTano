@@ -23,19 +23,29 @@ class ProviderError(RuntimeError):
 
 
 def stop_tree(process):
+    warning = ""
     if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-            timeout=15,
-        )
+        try:
+            result = subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=15,
+            )
+            if result.returncode:
+                warning = "taskkill não confirmou o encerramento dos subprocessos."
+        except (subprocess.TimeoutExpired, OSError):
+            warning = "taskkill indisponível ou sem resposta; encerrado o processo principal diretamente."
+        # A failed cleanup helper must not replace the original timeout/cancellation.
+        if process.poll() is None:
+            process.kill()
     else:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
     process.wait(timeout=20)
+    return warning
 
 
 class SpotProvider:

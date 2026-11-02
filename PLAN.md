@@ -1,9 +1,22 @@
 # Plano e evidência
 
+A versão local 2.1.0 reúne os testes rápido e completo de configuração recomendada,
+playlist padrão, ranking e aplicação explícita. Método e limites em
+[docs/PERFORMANCE-CALIBRATION.md](docs/PERFORMANCE-CALIBRATION.md).
+
+Pendências conhecidas: adequar os testes antigos da interface ao redesenho e
+validar a calibração completa com o provedor real nas condições de uso. Os testes
+focados não substituem essas verificações. Commit/push e publicação não fazem
+parte da geração do pacote local.
+
+O redesenho desktop 2.0.0 está documentado em
+[plano da nova interface](docs/ui-redesign/PLAN.md) e
+[conferência prática](docs/ui-redesign/VALIDATION.md).
+
 O plano das otimizações 1.1.0 está concluído em
 [docs/EXECUTION-OPTIMIZATION.md](docs/EXECUTION-OPTIMIZATION.md), com medições e
-[validação detalhada](docs/OPTIMIZATION-VALIDATION.md). A entrega local contém o
-executável e ZIP 1.1.0 para repetir o teste de dez faixas e avançar para duzentas.
+[validação detalhada](docs/OPTIMIZATION-VALIDATION.md). A entrega 1.1.0 serviu de
+referência para repetir o teste de dez faixas e avançar para duzentas.
 
 - [x] Pesquisar spotDL 4.6.0, yt-dlp, beets e documentação Kia/MusicBrainz.
 - [x] Escolher desktop Python/Tk + SQLite + adaptador isolado spotDL (MIT).

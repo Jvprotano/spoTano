@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from test_library import P1, P2, FakeProvider
 
+from spotano import ui
 from spotano.gui import App
 from spotano.provider import Cancelled
 
@@ -37,17 +38,19 @@ def app(tmp_path, tk_session):
     instance.cancel.set()
     pump_until_done(instance)
     instance.progress.stop()
+    # Let callbacks registered by child widgets clean up their own Tcl commands.
+    window.update_idletasks()
     for timer in window.tk.call("after", "info"):
         window.after_cancel(timer)
     window.destroy()
 
 
 def test_checkbox_selection_controls_actions_and_survives_refresh(app):
-    assert str(app.update_button["state"]) == "disabled"
+    assert str(app.force_button["state"]) == "disabled"
     app.playlists.focus("1")
     app.toggle_playlist(SimpleNamespace(keysym="space"))
     assert app.checked_playlists == {1}
-    assert str(app.update_button["state"]) == "normal"
+    assert str(app.mirror_button["state"]) == "normal"
     assert str(app.force_button["state"]) == "normal"
     assert str(app.new_button["state"]) == "normal"
     assert app.new_button.cget("text") == "Baixar / retomar"
@@ -65,6 +68,99 @@ def test_checkbox_selection_controls_actions_and_survives_refresh(app):
     assert str(app.new_button["state"]) == "disabled"
 
 
+def test_header_checkbox_toggles_all_and_shows_partial_state(app):
+    app.root.deiconify()
+    app.root.update()
+    assert app.playlists.heading("Marcar", "text") == "☐"
+    app.playlists.focus("1")
+    app.toggle_playlist(SimpleNamespace(keysym="space"))
+    assert app.playlists.heading("Marcar", "text") == "▣"
+    # Exercise the native heading binding, not just the callback.
+    _, first_y, _, _ = app.playlists.bbox("1")
+    for expected in ({1, 2}, set()):
+        app.playlists.event_generate("<ButtonPress-1>", x=22, y=first_y // 2)
+        app.playlists.event_generate("<ButtonRelease-1>", x=22, y=first_y // 2)
+        app.root.update()
+        assert app.checked_playlists == expected
+    app.playlists.event_generate("<Control-a>")
+    app.root.update()
+    assert app.checked_playlists == {1, 2}
+    assert app.playlists.heading("Marcar", "text") == "☑"
+    app.mark_playlists(False)
+    app.run(lambda: None)
+    app.toggle_all_playlists()
+    assert not app.checked_playlists
+    assert all(str(b["state"]) == "disabled" for b in (app.new_button, app.force_button, app.mirror_button))
+    pump_until_done(app)
+    for row in app.store.playlists():
+        app.store.remove_playlist(row["id"])
+    app.refresh()
+    app.toggle_all_playlists()
+    assert not app.checked_playlists and app.playlists.heading("Marcar", "text") == "☐"
+
+
+@pytest.mark.parametrize("action", ["Atualizar", "Detalhes", "Pasta", "Remover"])
+def test_row_icons_target_clicked_playlist_and_preserve_batch_selection(app, monkeypatch, action):
+    calls = []
+    monkeypatch.setattr(app, "refresh_selected", lambda row: calls.append(("Atualizar", row)))
+    monkeypatch.setattr(app, "assign_group", lambda row: calls.append(("Pasta", row)))
+    monkeypatch.setattr(app, "remove_playlist", lambda row: calls.append(("Remover", row)))
+    monkeypatch.setattr(app, "playlist_details_dialog", lambda: calls.append(("Detalhes", 2)))
+    app.checked_playlists = {1}
+    app.refresh_checks()
+    app.root.deiconify()
+    app.root.update()
+    x, y, width, height = app.playlists.bbox("2", action)
+    x, y = x + width // 2, y + height // 2
+    assert app.playlist_tooltip(x, y)
+    app.playlists.event_generate("<Button-1>", x=x, y=y)
+    assert calls == [(action, 2)]
+    assert app.playlists.selection() == ("2",)
+    assert app.checked_playlists == {1}
+    app.busy = True
+    app.playlist_row_action(action, "1")
+    assert calls == [(action, 2)]
+    app.busy = False
+
+
+def test_row_group_and_removal_do_not_modify_other_marked_playlists(app, monkeypatch):
+    app.mark_playlists(True)
+    monkeypatch.setattr("spotano.gui.simpledialog.askstring", lambda *args, **kwargs: "Viagem")
+    app.playlist_row_action("Pasta", "2")
+    assert [p["output_group"] for p in app.store.playlists()] == ["", "Viagem"]
+    prompts = []
+    monkeypatch.setattr(
+        "spotano.gui.messagebox.askyesno", lambda title, text, **kw: prompts.append(text) or False
+    )
+    app.playlist_row_action("Remover", "2")
+    assert len(app.store.playlists()) == 2
+    assert app.playlist_rows["2"]["name"] in prompts[0]
+    monkeypatch.setattr("spotano.gui.messagebox.askyesno", lambda *args, **kwargs: True)
+    app.playlist_row_action("Remover", "2")
+    assert [p["id"] for p in app.store.playlists()] == [1]
+    assert app.checked_playlists == {1}
+
+
+@pytest.mark.parametrize(
+    "button, force, remove",
+    [("new_button", False, False), ("force_button", True, False), ("mirror_button", False, True)],
+)
+def test_download_buttons_are_visible_and_keep_their_operation(app, monkeypatch, button, force, remove):
+    app.root.deiconify()
+    app.root.update()
+    control = getattr(app, button)
+    assert control.winfo_ismapped() and str(control["state"]) == "disabled"
+    calls = []
+    monkeypatch.setattr(
+        app, "sync", lambda force, remove_missing=False: calls.append((force, remove_missing))
+    )
+    app.mark_playlists(True)
+    control.invoke()
+    assert calls == [(force, remove)]
+    labels = [w.cget("text") for w in descendants(app.playlist_tab) if isinstance(w, ttk.Button)]
+    assert not any(text in labels for text in ("Mais ações", "Marcar todas", "Desmarcar", "Personalizar…"))
+
+
 def test_library_explains_correction_scope_and_shows_tracks_before_download(app):
     assert len(app.tracks.get_children()) == 2
     assert "Pastas por categoria estão desativadas" in app.library_hint.get()
@@ -77,11 +173,93 @@ def test_library_explains_correction_scope_and_shows_tracks_before_download(app)
     app.run = lambda work: work()
     app.tracks.selection_set("A" * 22)
     app.track_detail()
+    app.track_editor()
+    dialog = next(w for w in app.root.winfo_children() if isinstance(w, tk.Toplevel))
     app.category.set("Pop")
     next(
-        w for w in app.controls if isinstance(w, ttk.Button) and w.cget("text") == "Aplicar à faixa"
+        w for w in descendants(dialog) if isinstance(w, ttk.Button) and w.cget("text") == "Aplicar à faixa"
     ).invoke()
     assert calls == [("A" * 22, "Pop")]
+
+
+def test_category_filter_combines_with_search_and_state(app):
+    app.library.correct_genre("A" * 22, "Pop")
+    app.category_filter.set("Pop")
+    app.refresh_tracks()
+    assert app.tracks.get_children() == ("A" * 22,)
+    app.track_filter.set("Disponíveis")
+    app.refresh_tracks()
+    assert not app.tracks.get_children()
+    app.track_filter.set("Todas")
+    app.category_filter.set("Não classificada")
+    app.refresh_tracks()
+    assert app.tracks.get_children() == ("B" * 22,)
+    app.search.set("no matching track")
+    app.refresh_tracks()
+    assert not app.tracks.get_children()
+
+
+def test_track_checks_filter_scope_and_busy_guard(app):
+    app.tracks.focus("A" * 22)
+    app.toggle_track()
+    assert app.checked_tracks == {"A" * 22}
+    assert app.tracks.heading("Marcar", "text") == "▣"
+    app.refresh_tracks()
+    assert app.checked_tracks == {"A" * 22}
+    app.toggle_all_tracks()
+    assert app.checked_tracks == {"A" * 22, "B" * 22}
+    app.busy = True
+    app.toggle_all_tracks()
+    app.toggle_track()
+    assert len(app.checked_tracks) == 2
+    app.busy = False
+    app.library.correct_genre("A" * 22, "Pop")
+    app.category_filter.set("Pop")
+    app.refresh_tracks()
+    assert app.checked_tracks == {"A" * 22}
+    app.toggle_all_tracks()
+    assert not app.checked_tracks
+    assert str(app.bulk_track_button["state"]) == "disabled"
+
+
+def test_bulk_editor_applies_explicit_checked_snapshot(app, monkeypatch):
+    calls = []
+    monkeypatch.setattr(app.library, "correct_categories", lambda *args, **kw: calls.append((args, kw)))
+    app.run = lambda work: work()
+    app.toggle_all_tracks()
+    app.bulk_track_editor()
+    dialog = next(w for w in app.root.winfo_children() if isinstance(w, tk.Toplevel))
+    combo = next(w for w in descendants(dialog) if isinstance(w, ttk.Combobox))
+    button = next(
+        w for w in descendants(dialog) if isinstance(w, ttk.Button) and w.cget("text") == "Aplicar às faixas"
+    )
+    assert str(button["state"]) == "disabled"
+    combo.set("Pop")
+    combo.event_generate("<<ComboboxSelected>>")
+    button.invoke()
+    assert calls == [((("A" * 22, "B" * 22), "Pop"), {"artists": False})]
+
+
+def test_library_native_checkboxes_and_minimum_layout(app):
+    app.root.deiconify()
+    app.root.geometry("1000x760")
+    app.tabs.select(app.library_tab)
+    app.root.update()
+    x, y, width, height = app.tracks.bbox("A" * 22, "Marcar")
+    app.tracks.event_generate("<ButtonPress-1>", x=x + width // 2, y=y + height // 2)
+    app.tracks.event_generate("<ButtonRelease-1>", x=x + width // 2, y=y + height // 2)
+    app.root.update()
+    assert app.checked_tracks == {"A" * 22}
+    app.tracks.event_generate("<ButtonPress-1>", x=x + width // 2, y=y // 2)
+    app.tracks.event_generate("<ButtonRelease-1>", x=x + width // 2, y=y // 2)
+    app.root.update()
+    assert len(app.checked_tracks) == 2
+    assert app.category_filter.winfo_ismapped()
+    assert app.bulk_track_button.winfo_ismapped()
+    for control in (app.category_filter, app.bulk_track_button, app.edit_track_button):
+        assert (
+            control.winfo_rootx() + control.winfo_width() <= app.root.winfo_rootx() + app.root.winfo_width()
+        )
 
 
 def test_reopening_marks_playlists_with_saved_downloads_for_resume(app):
@@ -99,31 +277,168 @@ def test_reopening_marks_playlists_with_saved_downloads_for_resume(app):
         window.destroy()
 
 
-def test_performance_suggestion_only_changes_both_fields_when_applied(app, monkeypatch):
+def performance_report(app):
+    from spotano.benchmark import CONFIGURATIONS, REPETITIONS, report_recommendation
     from spotano.options import download_options
 
+    report = {
+        "schema_version": 2,
+        "status": "completed",
+        "created_at": "2026-10-30",
+        "repetitions": REPETITIONS,
+        "sample": [dict(song_id=str(i)) for i in range(4)],
+        "options": download_options(app.store),
+        "workload": {"musicbrainz": False, "lastfm_enabled": False, "output_layout": "playlists"},
+        "rows": [
+            dict(
+                download_workers=d,
+                conversion_workers=c,
+                round=r,
+                seconds=10 if (d, c) == (3, 1) else 20,
+                downloaded=4,
+                total=4,
+                failures=[],
+            )
+            for d, c in CONFIGURATIONS
+            for r in range(1, REPETITIONS + 1)
+        ],
+        "directory": str(app.store.root),
+    }
+    report["recommendation"] = report_recommendation(report)
+    return report
+
+
+def test_performance_suggestion_only_changes_both_fields_when_applied(app, monkeypatch):
     captured = {}
     monkeypatch.setattr(
         app,
-        "review",
-        lambda title, summary, lines, action, confirm: captured.update(action=action, confirm=confirm),
+        "performance_dialog",
+        lambda summary, ranking, lines, best, action, open_report: captured.update(
+            action=action,
+            best=best,
+            ranking=ranking,
+            summary=summary,
+        ),
     )
     before = app.store.setting("download_workers")
-    app.performance_result(
-        {
-            "status": "completed",
-            "created_at": "2026-10-27",
-            "options": download_options(app.store),
-            "rows": [],
-            "directory": str(app.store.root),
-            "recommendation": {"download_workers": 3, "conversion_workers": 1, "tracks_per_minute": 4},
-        }
-    )
-    assert captured["confirm"] == "Aplicar sugestão"
+    app.performance_result(performance_report(app))
+    assert captured["best"]["download_workers"] == 3
+    assert captured["ranking"][0]["seconds"] == 10
     assert app.store.setting("download_workers") == before
     captured["action"]()
     assert app.store.setting("download_workers") == 3 and app.download_workers.get() == "3"
     assert app.store.setting("conversion_workers") == 1 and app.conversion_workers.get() == "1"
+    assert "Configuração aplicada" in app.status.get()
+
+
+def test_performance_stale_workload_blocks_applying_even_after_dialog_opened(app, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        app,
+        "performance_dialog",
+        lambda summary, ranking, lines, best, action, open_report: captured.update(best=best, action=action),
+    )
+    monkeypatch.setattr("spotano.gui.messagebox.showinfo", lambda *args, **kwargs: None)
+    report = performance_report(app)
+    app.performance_result(report)
+    before = app.store.setting("download_workers")
+    app.store.set_setting("musicbrainz", True)
+    assert captured["action"]() is False
+    assert app.store.setting("download_workers") == before
+    app.performance_result(report)
+    assert captured["best"] is None
+
+
+def test_performance_dialog_displays_ranked_results_and_explicit_apply_button(app):
+    report = performance_report(app)
+    app.performance_result(report)
+    window = next(w for w in app.root.winfo_children() if isinstance(w, tk.Toplevel))
+
+    def descendants(widget):
+        for child in widget.winfo_children():
+            yield child
+            yield from descendants(child)
+
+    widgets = list(descendants(window))
+    table = next(w for w in widgets if isinstance(w, ttk.Treeview))
+    assert len(table.get_children()) == 16
+    assert table.item(table.get_children()[0], "values")[1:3] == ("3", "1")
+    button = next(
+        w
+        for w in widgets
+        if isinstance(w, ttk.Button) and w.cget("text") == "Aplicar configuração recomendada"
+    )
+    assert str(button.cget("state")) == "normal"
+    button.invoke()
+    assert app.store.setting("download_workers") == 3
+    assert app.store.setting("conversion_workers") == 1
+    assert not window.winfo_exists()
+
+
+@pytest.mark.parametrize("mode, size, downloads", [("quick", 4, 32), ("complete", 8, 384)])
+def test_performance_uses_default_playlist_without_imported_playlists(
+    app, monkeypatch, mode, size, downloads
+):
+    from spotano.benchmark import DEFAULT_PLAYLIST
+
+    for playlist in app.store.playlists():
+        app.store.remove_playlist(playlist["id"])
+    app.checked_playlists.clear()
+    before_tracks = app.store.tracks()
+    tracks = [dict(song_id=f"{i:022d}", name=str(i), artist="Own") for i in range(12)]
+    calls = []
+    app.library.provider.playlist = lambda url: calls.append(url) or {"name": "Test", "tracks": tracks}
+    monkeypatch.setattr(
+        "spotano.gui.PerformanceTest.run",
+        lambda self, sample, source_playlist, mode: calls.append((sample, source_playlist, mode)) or {},
+    )
+    captured = {}
+    monkeypatch.setattr(
+        app,
+        "review",
+        lambda title, summary, lines, action, confirm: captured.update(action=action, summary=summary),
+    )
+    monkeypatch.setattr(app, "run", lambda work, done: work())
+    assert app.performance_playlist.get() == DEFAULT_PLAYLIST
+    app.test_performance() if mode == "quick" else app.test_performance("complete")
+    assert not calls
+    assert f"{downloads} downloads" in captured["summary"]
+    captured["action"]()
+    assert calls[0] == DEFAULT_PLAYLIST
+    assert len(calls[1][0]) == size and calls[1][1:] == (DEFAULT_PLAYLIST, mode)
+    assert not app.store.playlists() and app.store.tracks() == before_tracks
+    app.performance_playlist.set(P1 + "?si=tracking")
+    app.save_performance_playlist()
+    assert app.store.setting("performance_playlist") == P1
+    app.reset_performance_playlist()
+    assert app.store.setting("performance_playlist") == DEFAULT_PLAYLIST
+
+
+def test_performance_quick_result_is_identified_and_can_be_applied(app, monkeypatch):
+    from spotano.benchmark import SCHEMA_VERSION, configurations_for
+
+    report = performance_report(app)
+    report.update(schema_version=SCHEMA_VERSION, mode="quick", repetitions=2, baseline=[3, 1])
+    report["rows"] = [
+        r
+        for r in report["rows"]
+        if (r["download_workers"], r["conversion_workers"]) in configurations_for("quick", [3, 1])
+        and r["round"] <= 2
+    ]
+    captured = {}
+    monkeypatch.setattr(
+        app,
+        "performance_dialog",
+        lambda summary, ranking, lines, best, action, open_report: captured.update(
+            summary=summary, ranking=ranking, best=best, action=action
+        ),
+    )
+    app.performance_result(report)
+    assert "teste rápido" in captured["summary"] and "Recomendação inicial" in captured["summary"]
+    assert len(captured["ranking"]) == 5
+    assert captured["ranking"][0]["initial_configuration"] is True
+    assert captured["action"]() is True
+    assert app.store.setting("download_workers") == 3 and app.store.setting("conversion_workers") == 1
 
 
 def test_selected_sync_preview_and_logs_cross_thread_queue(app):
@@ -131,7 +446,7 @@ def test_selected_sync_preview_and_logs_cross_thread_queue(app):
     app.review = lambda *args: captured.append(args)
     app.checked_playlists.add(2)
     app.sync(True)
-    assert app.busy and str(app.update_button["state"]) == "disabled"
+    assert app.busy and str(app.force_button["state"]) == "disabled"
     deadline = time.monotonic() + 5
     while app.busy and time.monotonic() < deadline:
         app.root.update()
@@ -175,7 +490,7 @@ def test_removing_selected_playlist_also_clears_checkbox(app, monkeypatch):
     app.remove_playlist()
     assert app.checked_playlists == set()
     assert len(app.store.playlists()) == 1
-    assert str(app.update_button["state"]) == "disabled"
+    assert str(app.force_button["state"]) == "disabled"
 
 
 def test_minimum_window_shows_playlist_rows_and_export_action(app):
@@ -194,11 +509,13 @@ def test_minimum_window_shows_playlist_rows_and_export_action(app):
         c for c in app.controls if isinstance(c, ttk.Button) and c.cget("text") == "Conferir e exportar"
     )
     assert export_button.winfo_ismapped()
-    assert export_button.winfo_rooty() + export_button.winfo_height() < app.log_text.winfo_rooty()
+    assert export_button.winfo_rooty() + export_button.winfo_height() <= app.activity.winfo_rooty()
     app.toggle_logs()
-    assert int(app.log_text["height"]) == 12
+    app.root.update_idletasks()
+    assert app.logs_panel.winfo_ismapped()
     app.toggle_logs()
-    assert int(app.log_text["height"]) == 3
+    app.root.update_idletasks()
+    assert not app.logs_panel.winfo_ismapped()
 
 
 def test_batch_progress_stays_visible_across_track_messages_and_cancel(app):
@@ -222,35 +539,37 @@ def test_refresh_only_then_explicit_partial_download_can_resume(app):
     app.review = lambda *args: reviews.append(args)
     app.checked_playlists = {2}
     app.refresh_checks()
-    app.update_button.invoke()
+    app.playlist_row_action("Atualizar", "2")
     pump_until_done(app)
     assert app.library.provider.downloads == []
     assert app.new_button.winfo_manager() == "pack"
-    assert app.incremental_actions.winfo_manager() == "pack"
+    assert app.mirror_button.winfo_manager() == "pack"
     assert "Nenhum áudio" in reviews[-1][1]
     app.library.validator = lambda path: None
     app.library.provider.fail.add("B" * 22)
     app.library.apply(app.library.preview(True, playlist_ids=[2], saved=True))
     app.refresh()
-    assert app.update_button.cget("text") == "Atualizar selecionadas"
     assert str(app.new_button["state"]) == "normal"
-    assert str(app.update_button["state"]) == "normal"
+    assert str(app.mirror_button["state"]) == "normal"
     app.library.provider.fail.clear()
     app.library.apply(app.library.preview(playlist_ids=[2], saved=True))
     app.refresh()
-    assert app.mirror_button.winfo_manager() == ""
+    assert app.mirror_button.winfo_manager() == "pack"
     assert str(app.new_button["state"]) == "normal"
 
 
-def test_refresh_is_available_for_mixed_and_new_playlists(app):
+def test_refresh_is_available_for_mixed_and_new_playlists_without_marking(app, monkeypatch):
+    calls = []
+    monkeypatch.setattr(app.library, "refresh_playlists", lambda ids: calls.append(ids))
+    monkeypatch.setattr(app, "run", lambda work, done: work())
     with app.store.connect() as db:
         db.execute("UPDATE playlists SET downloaded_at='2026-10-26T00:00:00+00:00' WHERE id=1")
-    app.checked_playlists = {1}
+    app.checked_playlists.clear()
     app.refresh()
-    assert str(app.update_button["state"]) == "normal"
-    app.mark_playlists(True)
-    assert str(app.update_button["state"]) == "normal"
-    assert str(app.force_button["state"]) == "normal"
+    app.playlist_row_action("Atualizar", "1")
+    app.playlist_row_action("Atualizar", "2")
+    assert calls == [[1], [2]]
+    assert not app.checked_playlists
 
 
 def test_changed_playlist_controls_and_folder_explanation_fit_minimum_window(app):
@@ -261,21 +580,20 @@ def test_changed_playlist_controls_and_folder_explanation_fit_minimum_window(app
     app.refresh()
     app.root.update()
     assert app.playlists.bbox("2")
-    assert app.incremental_actions.winfo_ismapped()
-    for button in (app.update_button, app.force_button, app.new_button, app.mirror_button):
+    for button in (app.force_button, app.new_button, app.mirror_button):
+        assert button.winfo_ismapped()
         assert button.winfo_rooty() > app.playlists.winfo_rooty()
         assert button.winfo_rootx() + button.winfo_width() < app.root.winfo_rootx() + app.root.winfo_width()
-        assert button.winfo_rooty() + button.winfo_height() < app.log_text.winfo_rooty()
+        assert button.winfo_rooty() + button.winfo_height() <= app.activity.winfo_rooty()
     assert "biblioteca compartilhada" in app.folder_hint.get()
     assert "uma pasta separada por playlist" in app.folder_hint.get()
-    folders = [app.playlists.set(i, "Pasta na exportação") for i in app.playlists.get_children()]
-    assert folders[0] != folders[1]
+    for column in app.playlist_actions:
+        x, y, width, height = app.playlists.bbox("2", column)
+        assert x + width <= app.playlists.winfo_width()
+        assert height > 0
     app.layout.set("Coleção unificada")
     app.change_layout()
     assert "todas as playlists ficam juntas" in app.folder_hint.get()
-    assert all(
-        app.playlists.set(i, "Pasta na exportação") == "Todas juntas" for i in app.playlists.get_children()
-    )
 
 
 def test_green_progress_and_folder_shortcuts_use_actual_download_and_export_paths(app, monkeypatch, tmp_path):
@@ -284,7 +602,7 @@ def test_green_progress_and_folder_shortcuts_use_actual_download_and_export_path
     app.open_downloads_button.invoke()
     assert opened == [app.library.music]
     style = ttk.Style(app.root)
-    assert style.lookup(app.progress.cget("style"), "background") == "#176548"
+    assert style.lookup(app.progress.cget("style"), "background") == ui.ACCENT
     app.sync_done({"downloaded": 2, "reused": 0, "failures": []})
     dialog = next(child for child in app.root.winfo_children() if isinstance(child, tk.Toplevel))
 
@@ -307,6 +625,21 @@ def test_green_progress_and_folder_shortcuts_use_actual_download_and_export_path
 
 def descendants(widget):
     return [child for item in widget.winfo_children() for child in [item, *descendants(item)]]
+
+
+def test_download_result_opens_run_report_without_changing_music_shortcut(app, monkeypatch, tmp_path):
+    opened = []
+    monkeypatch.setattr("spotano.gui.open_folder", opened.append)
+    directory = str(tmp_path / "runs" / "test")
+    app.sync_done(
+        {"downloaded": 1, "reused": 0, "failures": [("Song", "No match")], "run_directory": directory}
+    )
+    dialog = next(child for child in app.root.winfo_children() if isinstance(child, tk.Toplevel))
+    buttons = {w.cget("text"): w for w in descendants(dialog) if isinstance(w, ttk.Button)}
+    buttons["Ver relatório"].invoke()
+    assert opened[-1] == directory
+    buttons["Abrir pasta"].invoke()
+    assert opened[-1] == app.library.music
 
 
 def pump_until_done(app):
@@ -380,7 +713,7 @@ def test_inline_download_options_save_and_lock_during_operations(app):
         w
         for w in descendants(app.settings_tab)
         if isinstance(w, ttk.Checkbutton)
-        and w.cget("text").startswith(("Categoria:", "Artistas:", "Metadados:"))
+        and w.cget("text").startswith(("Categoria ·", "Artistas ·", "Metadados ·"))
     ]
     assert len(checks) == 3
     assert not any("Personalizar download" in str(w.cget("text")) for w in app.controls)

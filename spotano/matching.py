@@ -62,6 +62,7 @@ def editions(title):
 def clean_title(title):
     title = re.sub(r"\s[-–]\s(?:ao vivo|live|from)\b.*$", "", title, flags=re.I)
     title = re.sub(r"\((?:feat|ft|with|com)\b.*?\)", "", title, flags=re.I)
+    title = re.sub(r"\((?:ao vivo|live|acústico|acustico|acoustic)\b[^)]*\)", "", title, flags=re.I)
     text = words(title)
     if "remaster" in text:
         text = re.sub(r"\b(?:19|20)\d{2}\b", "", text)
@@ -93,43 +94,88 @@ def similarity(left, right):
     return SequenceMatcher(None, left, right).ratio() * 100 if left and right else 0
 
 
-def rank_candidate(metadata, result):
+def artist_words(value):
+    # Catalogues spell duos with &, e, and, or two separate artist credits.
+    return " ".join(
+        word
+        for word in words(value).split()
+        if word not in {"e", "and", "topic", "vevo", "oficial", "official"}
+    )
+
+
+def title_variants(value):
+    # Multiword parenthetical alternate titles (e.g. Be With You) may be omitted
+    # by one catalogue. Keep single event labels such as Nopelo360 significant.
+    def omit_alias(match):
+        text = words(match[1])
+        version_label = re.search(
+            r"\b(?:part|parte|pt|vol|volume|version|versao|edition|edicao|edit|mix|dvd|ep)\b|\d", text
+        )
+        return "" if len(text.split()) > 1 and not editions(match[1]) and not version_label else match[0]
+
+    without_aliases = re.sub(r"\(([^()]+)\)", omit_alias, value)
+    return {clean_title(value), clean_title(without_aliases)}
+
+
+def rank_candidate(metadata, result, *, rejected=None):
     """Hard identity/version gates plus a score; popularity cannot override them."""
-    wanted, found = editions(metadata["name"]), editions(result.name + " " + (result.album or ""))
+
+    def decline(reason):
+        if rejected is not None:
+            rejected["reason"] = reason
+        return None
+
+    wanted = editions(metadata["name"] + " " + (metadata.get("album_name") or ""))
+    found = editions(result.name + " " + (result.album or ""))
     if (found - wanted) & {"cover", "speed", "remix", "acoustic", "live"}:
-        return None
+        return decline("Edição diferente: cover, velocidade, remix, acústico ou ao vivo não solicitado")
     if wanted & {"live", "acoustic", "remix"} - found:
-        return None
+        return decline("Edição solicitada não identificada no candidato")
     if ("remaster" in wanted) != ("remaster" in found):
-        return None
+        return decline("Remasterização diferente da solicitada")
     years = set(re.findall(r"\b(?:19|20)\d{2}\b", metadata["name"]))
     if years and wanted & {"live", "remaster"}:
         candidate_years = set(re.findall(r"\b(?:19|20)\d{2}\b", result.name + " " + (result.album or "")))
         if not years.intersection(candidate_years):
-            return None
+            return decline("Ano da gravação ausente ou diferente do solicitado")
     target_duration = float(metadata.get("duration") or 0)
     candidate_duration = float(result.duration or 0)
     delta = abs(target_duration - candidate_duration) if target_duration and candidate_duration else None
     if delta is not None and delta > max(12, target_duration * 0.08):
-        return None
-    artist = words(metadata["artist"])
-    authors = [words(a) for a in (result.artists or (result.author,))]
-    authors = [re.sub(r"\b(topic|vevo|oficial|official)\b", "", a).strip() for a in authors]
+        return decline(
+            f"Duração incompatível: esperado {target_duration:.0f}s, candidato {candidate_duration:.0f}s"
+        )
+    artist = artist_words(metadata["artist"])
+    raw_authors = result.artists or (result.author,)
+    authors = [artist_words(a) for a in (*raw_authors, result.author, " ".join(raw_authors))]
     artist_score = max((similarity(artist, a) for a in authors), default=0)
     title = clean_title(result.name)
     # Normal video titles often contain the artist; remove only a complete prefix.
-    if title.startswith(artist + " "):
-        title = title[len(artist) + 1 :]
+    prefix = words(metadata["artist"])
+    if title.startswith(prefix + " "):
+        title = title[len(prefix) + 1 :]
         artist_score = max(artist_score, 95)
-    wanted_title = clean_title(metadata["name"])
-    title_score = similarity(wanted_title, title)
+    # An upload can credit all collaborators before the title.
+    parts = re.split(r"\s[-–|]\s", result.name, maxsplit=1)
+    if len(parts) == 2:
+        credited_prefix = artist_words(parts[0])
+        credits = [artist_words(name) for name in metadata.get("artists", [metadata["artist"]])]
+        combined = " ".join(credits)
+        if credited_prefix == combined:
+            title = clean_title(parts[1])
+            artist_score = max(artist_score, 95)
+    title_score = max(
+        similarity(left, right)
+        for left in title_variants(metadata["name"])
+        for right in {title, *title_variants(result.name)}
+    )
     if artist_score < 78 or title_score < 78:
-        return None
+        return decline(f"Identidade insuficiente: artista {artist_score:.0f}%, título {title_score:.0f}%")
     duration_score = max(0, 100 - (delta or 0) * 3) if delta is not None else 55
     score = title_score * 0.50 + artist_score * 0.35 + duration_score * 0.15
     if score < 85:
-        return None
-    credits = [words(value) for value in (metadata.get("artists") or [metadata["artist"]])]
+        return decline(f"Confiança insuficiente: {score:.1f} pontos")
+    credits = [artist_words(value) for value in (metadata.get("artists") or [metadata["artist"]])]
     coverage = sum(any(similarity(credit, author) >= 78 for author in authors) for credit in credits) / len(
         credits
     )
@@ -163,12 +209,49 @@ class FastMatcher:
         self.providers, self.progress = providers, progress
         self.stats = {"queries": 0, "candidates": 0, "view_extractions": 0}
         self.last_candidates = []
+        self.rejected_candidates = []
+        self.query_errors = []
 
     def candidates(self, metadata, limit=3, exclude=()):
         started = time.monotonic()
         self.last_candidates = []
+        self.rejected_candidates = []
+        self.query_errors = []
         query = metadata["artist"] + " " + metadata["name"]
         collected, errors = {}, []
+        seen_rejections, searched_youtube = set(), set()
+
+        def consider(result):
+            rejection = {}
+            ranked = rank_candidate(metadata, result, rejected=rejection)
+            if ranked and ranked["url"] not in exclude:
+                collected[ranked["url"]] = ranked
+            elif rejection and result.url not in seen_rejections:
+                seen_rejections.add(result.url)
+                self.rejected_candidates.append(
+                    {
+                        "url": result.url,
+                        "name": result.name,
+                        "artist": result.author,
+                        "artists": result.artists,
+                        "album": result.album,
+                        "duration": result.duration,
+                        **rejection,
+                    }
+                )
+                # Keep the closest titles first, rather than a page of unrelated results.
+                self.rejected_candidates.sort(
+                    key=lambda row: similarity(clean_title(metadata["name"]), clean_title(row["name"])),
+                    reverse=True,
+                )
+                del self.rejected_candidates[10:]
+
+        def query_error(exc):
+            from .telemetry import sanitize
+
+            errors.append(sanitize(f"{type(exc).__name__}: {exc}")[:700])
+            self.query_errors = errors[-5:]
+
         isrc = metadata.get("isrc") or ""
         if re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}\d{7}", isrc):
             for provider in self.providers:
@@ -180,9 +263,7 @@ class FastMatcher:
                     rows = provider.get_results(isrc, filter="songs", limit=5, ignore_spelling=True)
                     self.stats["candidates"] += len(rows)
                     for row in rows[:5]:
-                        ranked = rank_candidate(metadata, row)
-                        if ranked and ranked["url"] not in exclude:
-                            collected[ranked["url"]] = ranked
+                        consider(row)
                     if collected:
                         self.last_candidates = sorted(collected.values(), key=match_order, reverse=True)[
                             :limit
@@ -190,18 +271,31 @@ class FastMatcher:
                         if self.last_candidates[0]["score"] >= 94:
                             return self.last_candidates
                 except Exception as exc:
-                    errors.append(f"{type(exc).__name__}: {exc}")
+                    query_error(exc)
         # First page usually contains the recording. Expand only if confidence is insufficient.
-        for size in (10, 30):
+        compact = metadata["artist"] + " " + clean_title(metadata["name"])
+        markers = editions(metadata["name"])
+        if "live" in markers:
+            compact += " ao vivo"
+        if "acoustic" in markers:
+            compact += " acoustic"
+        searches = [(query, 10), (query, 30)]
+        if words(compact) != words(query):
+            searches.append((compact, 10))
+        for query, size in searches:
             for provider in self.providers:
                 if time.monotonic() - started > 55:
                     break
                 for kind in ("songs", "videos") if hasattr(provider, "client") else ("youtube",):
+                    # ytsearch10 has no larger page here; repeating it cannot expand results.
+                    if kind == "youtube" and (id(provider), query) in searched_youtube:
+                        continue
                     if time.monotonic() - started > 55:
                         break
                     self.stats["queries"] += 1
                     try:
                         if kind == "youtube":
+                            searched_youtube.add((id(provider), query))
                             results = self.youtube_results(provider, query, min(size, 10))
                         else:
                             provider.SEARCH_ATTEMPTS = 1
@@ -210,11 +304,9 @@ class FastMatcher:
                             )
                         self.stats["candidates"] += len(results)
                         for result in results[:size]:
-                            ranked = rank_candidate(metadata, result)
-                            if ranked and ranked["url"] not in exclude:
-                                collected[ranked["url"]] = ranked
+                            consider(result)
                     except Exception as exc:
-                        errors.append(f"{type(exc).__name__}: {exc}")
+                        query_error(exc)
                     ranked = sorted(collected.values(), key=match_order, reverse=True)
                     self.last_candidates = ranked[:limit]
                     if ranked and ranked[0]["score"] >= 94 and ranked[0]["verified"]:
@@ -231,6 +323,8 @@ class FastMatcher:
             reason = "nenhum candidato compatível com artista, título, duração e edição"
             if errors:
                 reason += "; " + errors[-1]
+            if self.rejected_candidates:
+                reason += ". Candidato mais próximo: " + self.rejected_candidates[0]["reason"]
             raise MatchError("Busca de correspondência: " + reason)
         best = self.last_candidates
         # Two close metadata-identical entries are often alternate uploads of one recording.
