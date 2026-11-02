@@ -61,7 +61,7 @@ def editions(title):
 
 def clean_title(title):
     title = re.sub(r"\s[-–]\s(?:ao vivo|live|from)\b.*$", "", title, flags=re.I)
-    title = re.sub(r"\((?:feat|ft|with|com)\b.*?\)", "", title, flags=re.I)
+    title = re.sub(r"\((?:feat|ft|with|com)\b[^)]*\)|\[(?:feat|ft|with|com)\b[^]]*\]", "", title, flags=re.I)
     title = re.sub(r"\((?:ao vivo|live|acústico|acustico|acoustic)\b[^)]*\)", "", title, flags=re.I)
     text = words(title)
     if "remaster" in text:
@@ -220,8 +220,19 @@ class FastMatcher:
         query = metadata["artist"] + " " + metadata["name"]
         collected, errors = {}, []
         seen_rejections, searched_youtube = set(), set()
+        evaluated = set()
 
         def consider(result):
+            # Expanded pages repeat results. Skip only identical metadata: another
+            # provider can supply the album/edition missing from the first result.
+            identity = (
+                result.url, result.name, result.author, tuple(result.artists or ()),
+                result.album, result.duration, result.verified, result.source,
+            )
+            if identity in evaluated:
+                self.stats["duplicate_candidates_skipped"] = self.stats.get("duplicate_candidates_skipped", 0) + 1
+                return
+            evaluated.add(identity)
             rejection = {}
             ranked = rank_candidate(metadata, result, rejected=rejection)
             if ranked and ranked["url"] not in exclude:

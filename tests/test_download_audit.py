@@ -14,6 +14,52 @@ from spotano.provider import Cancelled
 from spotano.telemetry import RunMetrics
 
 
+def test_square_bracket_guest_credit_matches_parentheses_without_relaxing_identity():
+    wanted = metadata(
+        name="Balada Louca [feat. João Neto & Frederico] - Ao Vivo",
+        artist="Munhoz & Mariano", duration=187,
+    )
+    candidate = result(
+        name="Balada Louca (Ao Vivo) (feat. João Neto & Frederico)",
+        artist="Munhoz & Mariano", duration=187,
+    )
+    assert rank_candidate(wanted, candidate)["score"] == 100
+    for other in (
+        result(name="Não Tô Valendo Nada (Ao Vivo)", artist="Munhoz & Mariano", duration=187),
+        result(name=candidate.name, artist="Outro artista", duration=187),
+        result(name="Balada Louca (Remix)", artist="Munhoz & Mariano", duration=187),
+        result(name=candidate.name, artist="Munhoz & Mariano", duration=100),
+    ):
+        assert rank_candidate(wanted, other) is None
+
+
+def test_expanded_pages_skip_identical_metadata_but_reconsider_album_evidence(monkeypatch):
+    import spotano.matching as matching
+
+    calls = []
+    original = matching.rank_candidate
+
+    def rank(*args, **kwargs):
+        calls.append(args[1])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(matching, "rank_candidate", rank)
+
+    class Provider:
+        client = object()
+
+        def get_results(self, query, **options):
+            incomplete = result(name="Song", album="Studio")
+            if options["limit"] == 30:
+                return [incomplete, result(name="Song", album="Ao Vivo")]
+            return [incomplete]
+
+    matcher = FastMatcher([Provider()])
+    assert matcher.candidates(metadata(name="Song - Ao Vivo"))[0]["score"] == 100
+    assert len(calls) == 2
+    assert matcher.stats["duplicate_candidates_skipped"] == 2
+
+
 @pytest.mark.parametrize("credits", [("Henrique", "Juliano"), ("Henrique e Juliano",)])
 def test_duo_credits_and_live_annotation_match(credits):
     wanted = metadata(artist="Henrique & Juliano", name="Desbeijar Minha Boca - Ao Vivo", duration=157)

@@ -4,10 +4,14 @@ Sua música, com você. Aplicação desktop open-source para acompanhar playlist
 Spotify, manter uma biblioteca MP3 organizada e exportar diferenças para um
 pendrive ou outra pasta. Interface em português, sem conta spoTano ou IA paga.
 
-## Versão 2.3.0
+## Versão 2.3.1
 
-Pacote local: `dist/spoTano-2.3.0-windows-x64.zip`. Extraia a pasta inteira e abra
+Pacote local: `dist/spoTano-2.3.1-windows-x64.zip`. Extraia a pasta inteira e abra
 `spoTano.exe`.
+
+A versão 2.3.1 corrige a busca de músicas com participações entre colchetes,
+evita reavaliar candidatos idênticos e impede que diagnósticos de uma faixa
+apareçam na seguinte. [Análise do log](docs/RELEASE-2.3.1-VALIDATION.md).
 
 Biblioteca com filtro por categoria combinado à busca e ao estado. Marque músicas
 pelos checkboxes e use **Ajustar marcadas…** para aplicar uma categoria às faixas
@@ -27,7 +31,7 @@ Teste de configuração recomendada com dois modos: **rápido** como ação prin
 e **completo** para comparar todas as combinações. Usa uma playlist padrão,
 mostra ranking por desempenho, identifica a configuração inicial e oferece
 **Aplicar configuração recomendada**. A configuração só muda ao aplicar.
-Conferência do pacote: [validação da 2.3.0](docs/RELEASE-2.3.0-VALIDATION.md).
+Conferência do pacote: [validação da 2.3.1](docs/RELEASE-2.3.1-VALIDATION.md).
 
 Novo ícone próprio: uma nota musical com seta, em verde e marfim, representa sua
 música com você. Aparece no executável, nos atalhos criados para ele, nas janelas

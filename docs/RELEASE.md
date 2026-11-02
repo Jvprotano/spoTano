@@ -1,3 +1,7 @@
+spoTano 2.3.1 corrige a identificação de participações entre colchetes, evita reavaliar candidatos idênticos e limpa diagnósticos entre faixas.
+
+Pacote: `dist/spoTano-2.3.1-windows-x64.zip`. Consulte [análise e validação](RELEASE-2.3.1-VALIDATION.md).
+
 spoTano 2.3.0 adiciona filtros por categoria e ajustes em massa na Biblioteca.
 
 - Filtro por categoria, incluindo Não classificada, combinado à busca e ao estado.

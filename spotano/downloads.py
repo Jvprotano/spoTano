@@ -388,6 +388,8 @@ class DownloadEngine:
         self.metrics, self.stage, self.stage_started = {}, "prepare", started
         self.track_started, self.active_match, self.failed_phase = started, None, None
         self.matcher.last_candidates = []
+        self.matcher.rejected_candidates = []
+        self.matcher.query_errors = []
         self.metrics["initialization_s"] = self.prepare_seconds if not self.download_count else 0
         self.download_count += 1
         self.matcher.stats = {"queries": 0, "candidates": 0, "view_extractions": 0}

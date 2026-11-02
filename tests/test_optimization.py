@@ -160,10 +160,15 @@ def test_cached_extraction_failure_falls_back_without_repeating_bad_candidate(tm
 
     def candidates(md, **options):
         assert options["exclude"] == {"https://www.youtube.com/watch?v=abcdefghijk"}
+        assert engine.matcher.rejected_candidates == []
+        assert engine.matcher.query_errors == []
         return [{"url": "https://www.youtube.com/watch?v=bcdefghijkl", "version": 1}]
 
     engine.downloader = Downloader()
-    engine.matcher = SimpleNamespace(stats={}, candidates=candidates)
+    engine.matcher = SimpleNamespace(
+        stats={}, candidates=candidates,
+        rejected_candidates=[{"name": "Previous song"}], query_errors=["Previous query error"],
+    )
     response = engine.download(
         metadata(_cached_match={"url": "https://www.youtube.com/watch?v=abcdefghijk"}), tmp_path / "final.mp3"
     )
