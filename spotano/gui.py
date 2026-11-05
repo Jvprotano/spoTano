@@ -62,7 +62,7 @@ class App(DesktopViews):
         if pending:
             self.status.set(
                 f"{len({row['track_id'] for row in pending})} faixas pendentes. "
-                "Playlists marcadas para continuar em Baixar / retomar."
+                "Use Retomar para continuar a execução incompleta."
             )
         root.after(100, self.pump)
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -168,9 +168,12 @@ class App(DesktopViews):
                     self.root.destroy()
                     return
                 if kind == "error":
-                    self.status.set(
-                        str(value) + " Use Baixar / retomar para continuar os downloads pendentes."
+                    hint = (
+                        " Use Retomar para continuar os downloads pendentes."
+                        if self.pending_playlists
+                        else ""
                     )
+                    self.status.set(str(value) + hint)
                     self.append_log(f"{'Cancelado' if isinstance(value, Cancelled) else 'Erro'}: {value}")
                     if not isinstance(value, Cancelled):
                         messagebox.showerror("Operação interrompida", str(value), parent=self.root)
@@ -247,10 +250,20 @@ class App(DesktopViews):
         )
         for button in (self.new_button, self.force_button, self.mirror_button):
             button.configure(state="normal" if count and not self.busy else "disabled")
+        self.pending_playlists = {
+            row["playlist_id"] for row in self.store.rows("SELECT DISTINCT playlist_id FROM download_pending")
+        }
+        if self.pending_playlists:
+            self.resume_button.pack(side="right")
+        else:
+            self.resume_button.pack_forget()
+        self.resume_button.configure(
+            state="normal" if self.pending_playlists and not self.busy else "disabled"
+        )
         total = len(self.playlists.get_children())
         self.playlists.heading("Marcar", text="☑" if total and count == total else "▣" if count else "☐")
         self.download_hint.set(
-            "Baixar / retomar usa a lista salva e continua as pendências. "
+            "Atualizar usa a lista salva. Retomar continua as playlists com execução pendente. "
             "Atualizar do Spotify consulta mudanças, sem baixar nem remover áudio."
         )
 
@@ -447,7 +460,9 @@ class App(DesktopViews):
             self.url.set("")
             self.checked_playlists.add(playlist_id)
             self.refresh()
-            self.status.set("Playlist importada e marcada. Clique em Baixar / retomar para baixar os áudios.")
+            self.status.set(
+                "Playlist importada e marcada. Clique em Atualizar (Apenas Adiciona novos) para baixar os áudios."
+            )
 
         self.run(lambda: self.library.import_playlist(url), imported)
 
@@ -521,8 +536,17 @@ class App(DesktopViews):
 
         self.run(lambda: self.library.refresh_playlists(selected), refreshed)
 
-    def sync(self, force, remove_missing=False):
-        selected = sorted(self.checked_playlists)
+    def sync(self, force, remove_missing=False, resume=False):
+        selected = (
+            sorted(
+                {
+                    row["playlist_id"]
+                    for row in self.store.rows("SELECT DISTINCT playlist_id FROM download_pending")
+                }
+            )
+            if resume
+            else sorted(self.checked_playlists)
+        )
         if not selected or self.busy:
             return
 
@@ -548,18 +572,24 @@ class App(DesktopViews):
                 self.folder_hint.get(),
             ]
             self.review(
-                "Conferir download e remoção" if remove_missing else "Conferir download",
+                "Conferir retomada"
+                if resume
+                else "Conferir download e remoção"
+                if remove_missing
+                else "Conferir download",
                 f"{len(selected)} playlist(s) selecionada(s)\n"
                 f"{len(plan.downloads)} downloads · {plan.retained} reutilizadas · "
                 f"{len(plan.added)} inclusões · {len(plan.removed)} saídas de playlists"
                 + (f" · {len(plan.cleanup)} arquivos para a lixeira" if remove_missing else ""),
                 lines,
                 lambda: self.run(lambda: self.library.apply(plan), self.sync_done),
-                "Baixar tudo"
+                "Retomar"
+                if resume
+                else "Baixar tudo"
                 if force
-                else "Baixar e remover excluídas"
+                else "Atualizar (Adiciona e Remove)"
                 if remove_missing
-                else "Baixar / retomar",
+                else "Atualizar (Apenas Adiciona novos)",
             )
             self.status.set("Prévia pronta. Confira as diferenças e confirme os downloads.")
 
@@ -576,7 +606,7 @@ class App(DesktopViews):
             f"{result['downloaded']} baixadas · {result['reused']} reutilizadas · {len(result['failures'])} falhas\n"
             f"{result.get('removed', 0)} arquivos movidos para a lixeira."
             + (
-                "\n\nUse Baixar / retomar para continuar. Os motivos estão no relatório e na Biblioteca."
+                "\n\nUse Retomar para continuar. Os motivos estão no relatório e na Biblioteca."
                 if result["failures"]
                 else ""
             ),

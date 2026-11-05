@@ -184,14 +184,19 @@ class DesktopViews:
         self.url = tk.StringVar()
         self.options_caption = tk.StringVar()
         ttk.Separator(footer).pack(fill="x", pady=14)
+        selection = ttk.Frame(footer)
+        selection.pack(fill="x", pady=(0, 8))
+        self.selection_summary = tk.StringVar()
+        ttk.Label(selection, textvariable=self.selection_summary, style="Muted.TLabel").pack(side="left")
+        self.resume_button = self.button(selection, "Retomar", lambda: self.sync(False, resume=True))
         actions = ttk.Frame(footer)
         actions.pack(fill="x", pady=(0, 16))
-        self.selection_summary = tk.StringVar()
-        ttk.Label(actions, textvariable=self.selection_summary, style="Muted.TLabel").pack(side="left")
-        self.new_button = self.button(actions, "Baixar / retomar", lambda: self.sync(False), True)
+        self.new_button = self.button(
+            actions, "Atualizar (Apenas Adiciona novos)", lambda: self.sync(False), True
+        )
         self.new_button.pack(side="right")
         self.mirror_button = self.button(
-            actions, "Baixar e remover", lambda: self.sync(False, remove_missing=True)
+            actions, "Atualizar (Adiciona e Remove)", lambda: self.sync(False, remove_missing=True)
         )
         self.mirror_button.pack(side="right", padx=8)
         self.force_button = self.button(actions, "Baixar tudo", lambda: self.sync(True))

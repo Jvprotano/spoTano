@@ -473,7 +473,7 @@ class Library:
                     "track_finished",
                     track_id=track_id,
                     status="cancelled",
-                    error="Operação cancelada; use Baixar / retomar.",
+                    error="Operação cancelada; use Retomar.",
                     seconds=round(time.monotonic() - started, 3),
                 )
                 raise

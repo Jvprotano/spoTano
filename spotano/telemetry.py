@@ -144,7 +144,7 @@ class RunMetrics:
                     **identity,
                     "status": "pending" if requested else "reused",
                     "error": (
-                        "Download não concluído; use Baixar / retomar. Execução: "
+                        "Download não concluído; use Retomar. Execução: "
                         + RUN_STATUS.get(status, status)
                         if requested
                         else ""
@@ -172,7 +172,7 @@ def write_run_report(directory, summary):
         f"{sum(row['status'] == 'reused' for row in tracks)} reutilizadas · "
         f"{len(missing)} não concluídas",
         "",
-        "Use Baixar / retomar para tentar as pendências; arquivos íntegros serão reutilizados.",
+        "Use Retomar para tentar as pendências; arquivos íntegros serão reutilizados.",
         "Se a gravação continuar sem correspondência, revise Biblioteca → Fonte do áudio.",
         "",
     ]

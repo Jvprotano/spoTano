@@ -4,10 +4,16 @@ Sua música, com você. Aplicação desktop open-source para acompanhar playlist
 Spotify, manter uma biblioteca MP3 organizada e exportar diferenças para um
 pendrive ou outra pasta. Interface em português, sem conta spoTano ou IA paga.
 
-## Versão 2.4.0
+## Versão 2.4.1
 
-Pacote local: `dist/spoTano-2.4.0-windows-x64.zip`. Extraia a pasta inteira e abra
+Pacote local: `dist/spoTano-2.4.1-windows-x64.zip`. Extraia a pasta inteira e abra
 `spoTano.exe`.
+
+As ações de playlists agora se chamam **Atualizar (Adiciona e Remove)** e
+**Atualizar (Apenas Adiciona novos)**. **Retomar** aparece separadamente quando
+uma execução deixa downloads pendentes e continua as playlists pendentes,
+independentemente das playlists marcadas. Desaparece ao concluir as pendências.
+[Validação da 2.4.1](docs/RELEASE-2.4.1-VALIDATION.md).
 
 Conversão rápida pelo Windows como padrão, com recuperação automática pelo LAME.
 Em Configurações → Desempenho → Conversão MP3, escolha **Rápida · Windows** ou
@@ -30,8 +36,8 @@ têm prioridade. Fonte do áudio e associação de MP3 permanecem individuais.
 
 Playlists com ações diretas na própria linha: atualizar do Spotify, detalhes,
 pasta/grupo e remover. O checkbox do cabeçalho marca ou desmarca todas; seleção
-parcial tem indicador próprio. **Baixar / retomar**, **Baixar tudo** e **Baixar e
-remover** ficam sempre visíveis e são habilitados ao marcar playlists. As opções
+parcial tem indicador próprio. **Atualizar (Apenas Adiciona novos)**, **Baixar tudo** e
+**Atualizar (Adiciona e Remove)** ficam sempre visíveis e são habilitados ao marcar playlists. As opções
 de download continuam em Configurações → Downloads.
 
 Teste de configuração recomendada com dois modos: **rápido** como ação principal
@@ -85,7 +91,7 @@ consultar vídeos individuais apenas para contar visualizações. A pesquisa amp
 os resultados quando necessário e tenta até três gravações compatíveis em caso
 de falha de extração. Correspondências validadas ficam em cache por Spotify ID e
 metadados; URLs temporárias de mídia são renovadas na extração. Arquivos locais
-íntegros continuam sendo reutilizados em **Baixar / retomar**.
+íntegros continuam sendo reutilizados em **Atualizar (Apenas Adiciona novos)** e **Retomar**.
 
 Cada execução guarda `events.jsonl`, `summary.json`, `report.txt` e `failures.csv`
 na pasta de dados, em `runs/<execução>/`. O relatório identifica música, artista,
@@ -208,7 +214,7 @@ e [otimização anterior](docs/EXECUTION-OPTIMIZATION.md).
    Requer internet e espaço em disco; não exige ambiente de desenvolvimento.
 5. Em **Playlists → Adicionar playlist**, cole uma URL pública e clique **Importar playlist**.
    Nome e faixas são consultados imediatamente, sem baixar áudio. Marque uma ou
-   mais playlists, clique **Baixar / retomar**, confira a prévia e confirme.
+   mais playlists, clique **Atualizar (Apenas Adiciona novos)**, confira a prévia e confirme.
 
 O binário ainda não tem assinatura de código. Use a distribuição deste
 repositório e confira `SHA256SUMS.txt` com `Get-FileHash` se desejar.
@@ -230,14 +236,17 @@ O ícone **↻** da linha (**F5**) consulta somente aquela playlist, salva a lis
 verifica diferenças e integridade local. **Não baixa nem remove áudios.** Está
 disponível mesmo antes do primeiro download. Para baixar os áudios:
 
-- **Baixar / retomar**: sempre disponível ao marcar playlists. Baixa faixas novas,
+- **Atualizar (Apenas Adiciona novos)**: disponível ao marcar playlists. Baixa faixas novas,
   ausentes e pendências de uma execução interrompida, reaproveitando as concluídas.
   Mantém na biblioteca os arquivos das faixas que saíram da playlist.
-- **Baixar e remover**: baixa as pendências e move para a lixeira local
+- **Atualizar (Adiciona e Remove)**: baixa as pendências e move para a lixeira local
   os arquivos das faixas que saíram. Preserva músicas usadas ou mantidas por outras
   playlists. Se algum download falhar, nenhuma remoção é executada.
+- **Retomar**: aparece somente se uma execução deixou downloads pendentes, inclusive
+  após reabrir o app. Continua as playlists pendentes sem exigir marcação e sem
+  incluir outras playlists marcadas. Ao concluir as pendências, o botão desaparece.
 
-As duas ações usam a última lista salva, sem outra consulta ao Spotify. A prévia
+Essas ações usam a última lista salva, sem outra consulta ao Spotify. A prévia
 mostra os downloads e os caminhos que serão movidos. É possível baixar novas agora
 e escolher remover as excluídas depois, inclusive após reiniciar o aplicativo.
 Uma faixa com o mesmo Spotify ID em várias playlists ocupa um só arquivo interno.
@@ -256,13 +265,13 @@ compartilhadas entre elas. A prévia informa a data da última leitura. Para bus
 mudanças na playlist, use **Atualizar do Spotify**. Os
 arquivos anteriores são mantidos até o novo MP3 ser validado. Um download que
 falha não impede os seguintes; o erro aparece na Biblioteca. Se o arquivo antigo
-continua íntegro, ele permanece utilizável. **Baixar / retomar** repete a
+continua íntegro, ele permanece utilizável. **Retomar** repete a
 substituição pendente, sem repetir as substituições que já terminaram.
 
 O estado persiste entre execuções. A fila inteira é salva antes de começar;
 cada MP3 validado é registrado separadamente. Fechar durante uma operação solicita
 cancelamento. Após cancelamento, queda de conexão ou encerramento abrupto, abra
-novamente e use **Baixar / retomar**: as playlists com pendências já ficam marcadas.
+novamente e use **Retomar**, disponível enquanto houver downloads pendentes.
 Não é preciso consultar o Spotify novamente para continuar a lista salva. Isso
 também vale para **Baixar tudo**: arquivos antigos válidos não escondem as
 substituições que ainda faltam. A faixa interrompida começa novamente; os MP3s já

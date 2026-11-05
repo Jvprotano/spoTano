@@ -53,7 +53,9 @@ def test_checkbox_selection_controls_actions_and_survives_refresh(app):
     assert str(app.mirror_button["state"]) == "normal"
     assert str(app.force_button["state"]) == "normal"
     assert str(app.new_button["state"]) == "normal"
-    assert app.new_button.cget("text") == "Baixar / retomar"
+    assert app.new_button.cget("text") == "Atualizar (Apenas Adiciona novos)"
+    assert app.mirror_button.cget("text") == "Atualizar (Adiciona e Remove)"
+    assert not app.resume_button.winfo_manager()
     assert app.force_button.cget("text") == "Baixar tudo"
     app.refresh()
     assert app.checked_playlists == {1}
@@ -272,9 +274,48 @@ def test_reopening_marks_playlists_with_saved_downloads_for_resume(app):
         assert restarted.checked_playlists == {2}
         assert "1 faixas pendentes" in restarted.status.get()
         assert str(restarted.new_button["state"]) == "normal"
+        assert restarted.resume_button.winfo_manager() == "pack"
+        assert str(restarted.resume_button["state"]) == "normal"
+        assert "Use Retomar" in restarted.status.get()
         assert restarted.tracks.set("B" * 22, "Estado") == "Download pendente"
     finally:
         window.destroy()
+
+
+def test_resume_appears_after_interruption_and_targets_pending_playlists(app, monkeypatch):
+    reviews = []
+    app.review = lambda *args: reviews.append(args)
+    app.show_saved_result = lambda *args, **kwargs: None
+    app.mark_playlists(True)
+    assert not app.resume_button.winfo_manager()  # Importing alone is not an interrupted run.
+    app.library.validator = lambda path: None
+    app.library.apply(app.library.preview(playlist_ids=[2], saved=True))
+    app.library.provider.downloads.clear()
+    with app.store.connect() as db:
+        db.execute("INSERT INTO download_pending VALUES(2,?)", ("B" * 22,))
+    app.busy = True
+    app.events.put(("error", Cancelled("Cancelado")))
+    app.pump()
+    assert app.resume_button.winfo_manager() == "pack"
+    assert "Use Retomar" in app.status.get()
+    app.checked_playlists = {1}  # Resume must not download an unrelated checked playlist.
+    app.refresh_checks()
+    monkeypatch.setattr(
+        app.library.provider, "playlist", lambda url: pytest.fail("Resume must use saved metadata")
+    )
+    app.resume_button.invoke()
+    assert str(app.resume_button["state"]) == "disabled"
+    pump_until_done(app)
+    assert reviews[-1][0] == "Conferir retomada"
+    assert reviews[-1][-1] == "Retomar"
+    assert app.library.provider.downloads == []  # A preview still requires confirmation.
+    reviews[-1][3]()
+    pump_until_done(app)
+    assert app.library.provider.downloads == ["B" * 22]
+    assert app.checked_playlists == {1}
+    assert not app.resume_button.winfo_manager()
+    app.resume_button.invoke()
+    assert not app.busy
 
 
 def performance_report(app):
@@ -288,7 +329,12 @@ def performance_report(app):
         "repetitions": REPETITIONS,
         "sample": [dict(song_id=str(i)) for i in range(4)],
         "options": download_options(app.store),
-        "workload": {"musicbrainz": False, "lastfm_enabled": False, "output_layout": "playlists"},
+        "workload": {
+            "musicbrainz": False,
+            "lastfm_enabled": False,
+            "output_layout": "playlists",
+            "conversion_encoder": app.store.setting("conversion_encoder", "windows"),
+        },
         "rows": [
             dict(
                 download_workers=d,
@@ -552,10 +598,12 @@ def test_refresh_only_then_explicit_partial_download_can_resume(app):
     assert str(app.new_button["state"]) == "normal"
     assert str(app.mirror_button["state"]) == "normal"
     app.library.provider.fail.clear()
+    assert app.resume_button.winfo_manager() == "pack"
     app.library.apply(app.library.preview(playlist_ids=[2], saved=True))
     app.refresh()
     assert app.mirror_button.winfo_manager() == "pack"
     assert str(app.new_button["state"]) == "normal"
+    assert not app.resume_button.winfo_manager()
 
 
 def test_refresh_is_available_for_mixed_and_new_playlists_without_marking(app, monkeypatch):
@@ -576,12 +624,15 @@ def test_changed_playlist_controls_and_folder_explanation_fit_minimum_window(app
     app.root.geometry("1000x760")
     app.root.deiconify()
     app.verified_playlists = {1, 2}
+    with app.store.connect() as db:
+        db.execute("INSERT INTO download_pending VALUES(2,?)", ("B" * 22,))
     app.mark_playlists(True)
     app.refresh()
     app.root.update()
     assert app.playlists.bbox("2")
-    for button in (app.force_button, app.new_button, app.mirror_button):
+    for button in (app.force_button, app.new_button, app.mirror_button, app.resume_button):
         assert button.winfo_ismapped()
+        assert button.winfo_rootx() >= app.playlists.winfo_rootx()
         assert button.winfo_rooty() > app.playlists.winfo_rooty()
         assert button.winfo_rootx() + button.winfo_width() < app.root.winfo_rootx() + app.root.winfo_width()
         assert button.winfo_rooty() + button.winfo_height() <= app.activity.winfo_rooty()
